@@ -1,0 +1,54 @@
+require "rails_helper"
+
+RSpec.describe "upload → parse → audit → findings" do
+  before { seed_all! }
+
+  let(:client) { Accounts::Client.find_by!(cnpj: "12345678000190") }
+
+  it "imports the XML with derivations and produces the expected findings" do
+    result = Ingestion::DocumentImporter.new(client:).call(nfe_fixture("sale_return_csosn_102"))
+    expect(result.status).to eq(:created)
+    doc = result.document
+    expect(doc.role).to eq("issuer")
+    expect(doc.operation_nature).to eq("sale_return")
+    expect(doc.status_state).to eq("authorized")
+    item = doc.items.first.data
+    expect(item).to include("net_amount" => "1000.00", "cfop_nature" => "sale_return", "cfop_group" => "inbound_intrastate", "cfop_scope" => "intrastate")
+    expect(item["icms"]).to include("situation_code" => "102", "situation_field" => "csosn", "taxation_kind" => "simples_without_credit")
+    expect(item["ibs_cbs"]["schedule_rates"]).to include("cbs" => "0.90")
+    expect(doc.data["totals"]["totals_mismatch"]).to eq({})
+
+    expect(Ingestion::DocumentImporter.new(client:).call(nfe_fixture("sale_return_csosn_102")).status).to eq(:duplicate)
+
+    run = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
+    Audit::Runner.new(run).call
+    run.reload
+    expect(run.state).to eq("done")
+    expect(run.evaluation_errors).to eq([])
+    codes = run.findings.pluck(:rule_code)
+    expect(codes).to include("ICMS.CSOSN.SALE_RETURN")
+    expect(codes).not_to include("ICMS.REGIME.SITUATION_FIELD", "DOC.TOTALS.ITEMS_SUM", "CFOP.SCOPE.MATCH", "IBSCBS.GROUP.REQUIRED", "IBSCBS.CBS.RATE_SCHEDULE", "DOC.RETURN.REFERENCE")
+    f = run.findings.find_by(rule_code: "ICMS.CSOSN.SALE_RETURN")
+    expect(f.message).to include("encontrado 102")
+    expect(f.evidence).to include("item.icms.csosn" => "102")
+    expect(f.item_number).to eq(1)
+    expect(run.snapshot["rule_ids"]).to be_present
+  end
+
+  it "keeps the finding state across runs (dedupe_key) and honours client overrides" do
+    Ingestion::DocumentImporter.new(client:).call(nfe_fixture("sale_return_csosn_102"))
+    run1 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
+    Audit::Runner.new(run1).call
+    run1.findings.find_by!(rule_code: "ICMS.CSOSN.SALE_RETURN").update!(state: "justified", state_note: "cliente tem entendimento próprio")
+
+    run2 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
+    Audit::Runner.new(run2).call
+    expect(run2.findings.find_by!(rule_code: "ICMS.CSOSN.SALE_RETURN").state).to eq("justified")
+
+    Rules::RuleOverride.create!(rule_code: "ICMS.CSOSN.SALE_RETURN", source_type: "client", source_id: client.id, action: "disable",
+                                effective_from: Date.new(2026, 1, 1), justification: "decisão do contador", created_by: Accounts::User.first)
+    run3 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
+    Audit::Runner.new(run3).call
+    expect(run3.findings.pluck(:rule_code)).not_to include("ICMS.CSOSN.SALE_RETURN")
+  end
+end

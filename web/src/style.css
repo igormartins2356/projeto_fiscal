@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@plugin "tailwindcss-primeui";
+
+@theme {
+  --color-primary: var(--color-blue-700);
+  --color-primary-contrast: #fff;
+}
+
+body { @apply bg-slate-50 text-slate-800 antialiased; }

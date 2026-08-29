@@ -1,0 +1,66 @@
+# Ambiente de desenvolvimento. Produção: Kamal/compose próprio na VPS (fase de deploy).
+name: fiscal
+
+x-api: &api
+  build:
+    context: ./api
+    dockerfile: Dockerfile.dev
+  volumes:
+    - ./api:/rails
+    - bundle:/usr/local/bundle
+  env_file: .env
+  user: "${UID:-1000}:${GID:-1000}"
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_started
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: fiscal
+      POSTGRES_PASSWORD: fiscal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fiscal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+
+  api:
+    <<: *api
+    command: sh -c "rm -f tmp/pids/server.pid && bin/rails server -b 0.0.0.0"
+    ports:
+      - "3000:3000"
+
+  sidekiq:
+    <<: *api
+    command: bundle exec sidekiq -C config/sidekiq.yml
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./web:/app
+      - node_modules:/app/node_modules
+    environment:
+      VITE_API_URL: http://localhost:3000
+    ports:
+      - "5174:5173"
+
+volumes:
+  pgdata:
+  redisdata:
+  bundle:
+  node_modules:

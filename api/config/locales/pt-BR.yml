@@ -1,0 +1,6 @@
+pt-BR:
+  errors:
+    messages:
+      blank: "não pode ficar em branco"
+      taken: "já está em uso"
+      inclusion: "não está incluído na lista"

@@ -1,0 +1,18 @@
+# Imagem de desenvolvimento (a Dockerfile na raiz de api/ é a de produção, gerada pelo Rails).
+FROM ruby:3.4-slim
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    build-essential git libpq-dev libyaml-dev pkg-config curl postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV BUNDLE_PATH=/usr/local/bundle \
+    RAILS_ENV=development \
+    LANG=C.UTF-8
+
+WORKDIR /rails
+COPY Gemfile Gemfile.lock* ./
+RUN bundle install && chmod -R a+rwX /usr/local/bundle
+
+COPY . .
+EXPOSE 3000
+CMD ["bin/rails", "server", "-b", "0.0.0.0"]
