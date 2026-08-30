@@ -229,7 +229,7 @@ Duas famílias, ambas com vigência e com autoria obrigatória (`created_by`, `j
   "rule_code": "ICMS.CSOSN.SALE_RETURN",
   "source_type": "client", "source_id": 118,
   "effective_from": "2026-01-01", "effective_until": null,
-  "action": "adjust",                       // disable | adjust | replace
+  "override_action": "adjust",              // disable | enable | adjust | replace
   "patch": {                                // só para adjust
     "severity": "warning",
     "params": {"tolerance": "0.05"},

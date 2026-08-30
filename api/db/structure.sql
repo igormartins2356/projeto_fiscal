@@ -41,6 +41,42 @@ CREATE TABLE public.ar_internal_metadata (
 
 
 --
+-- Name: audit_logs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_logs (
+    id bigint NOT NULL,
+    firm_id bigint,
+    user_id bigint,
+    action character varying NOT NULL,
+    subject_type character varying,
+    subject_id bigint,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    ip character varying,
+    created_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: audit_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.audit_logs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: audit_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.audit_logs_id_seq OWNED BY public.audit_logs.id;
+
+
+--
 -- Name: audit_runs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -536,6 +572,43 @@ ALTER SEQUENCE public.reference_versions_id_seq OWNED BY public.reference_versio
 
 
 --
+-- Name: refresh_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.refresh_tokens (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    token_digest character varying NOT NULL,
+    family character varying NOT NULL,
+    expires_at timestamp(6) without time zone NOT NULL,
+    revoked_at timestamp(6) without time zone,
+    user_agent character varying,
+    ip character varying,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.refresh_tokens_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.refresh_tokens_id_seq OWNED BY public.refresh_tokens.id;
+
+
+--
 -- Name: rule_overrides; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -544,7 +617,7 @@ CREATE TABLE public.rule_overrides (
     rule_code character varying NOT NULL,
     source_type character varying NOT NULL,
     source_id bigint NOT NULL,
-    action character varying NOT NULL,
+    override_action character varying NOT NULL,
     patch jsonb DEFAULT '{}'::jsonb NOT NULL,
     effective_from date NOT NULL,
     effective_until date,
@@ -757,7 +830,14 @@ CREATE TABLE public.users (
     role character varying DEFAULT 'accountant'::character varying NOT NULL,
     last_sign_in_at timestamp(6) without time zone,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    otp_secret character varying,
+    otp_enabled boolean DEFAULT false NOT NULL,
+    otp_backup_codes jsonb DEFAULT '[]'::jsonb NOT NULL,
+    failed_attempts integer DEFAULT 0 NOT NULL,
+    locked_until timestamp(6) without time zone,
+    active boolean DEFAULT true NOT NULL,
+    password_changed_at timestamp(6) without time zone
 );
 
 
@@ -778,6 +858,13 @@ CREATE SEQUENCE public.users_id_seq
 --
 
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- Name: audit_logs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs ALTER COLUMN id SET DEFAULT nextval('public.audit_logs_id_seq'::regclass);
 
 
 --
@@ -865,6 +952,13 @@ ALTER TABLE ONLY public.reference_versions ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
+-- Name: refresh_tokens id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.refresh_tokens ALTER COLUMN id SET DEFAULT nextval('public.refresh_tokens_id_seq'::regclass);
+
+
+--
 -- Name: rule_overrides id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -912,6 +1006,14 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 ALTER TABLE ONLY public.ar_internal_metadata
     ADD CONSTRAINT ar_internal_metadata_pkey PRIMARY KEY (key);
+
+
+--
+-- Name: audit_logs audit_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs
+    ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
 
 
 --
@@ -1011,6 +1113,14 @@ ALTER TABLE ONLY public.reference_versions
 
 
 --
+-- Name: refresh_tokens refresh_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.refresh_tokens
+    ADD CONSTRAINT refresh_tokens_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: rule_overrides rule_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1092,6 +1202,34 @@ CREATE INDEX idx_on_rule_code_source_type_source_id_078181d667 ON public.rule_ov
 --
 
 CREATE INDEX idx_ref_row_overrides_lookup ON public.reference_row_overrides USING btree (reference_table_id, source_type, source_id, key);
+
+
+--
+-- Name: index_audit_logs_on_firm_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_audit_logs_on_firm_id ON public.audit_logs USING btree (firm_id);
+
+
+--
+-- Name: index_audit_logs_on_firm_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_audit_logs_on_firm_id_and_created_at ON public.audit_logs USING btree (firm_id, created_at);
+
+
+--
+-- Name: index_audit_logs_on_subject_type_and_subject_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_audit_logs_on_subject_type_and_subject_id ON public.audit_logs USING btree (subject_type, subject_id);
+
+
+--
+-- Name: index_audit_logs_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_audit_logs_on_user_id ON public.audit_logs USING btree (user_id);
 
 
 --
@@ -1417,6 +1555,27 @@ CREATE UNIQUE INDEX index_reference_versions_on_reference_table_id_and_version O
 
 
 --
+-- Name: index_refresh_tokens_on_family; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_refresh_tokens_on_family ON public.refresh_tokens USING btree (family);
+
+
+--
+-- Name: index_refresh_tokens_on_token_digest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_refresh_tokens_on_token_digest ON public.refresh_tokens USING btree (token_digest);
+
+
+--
+-- Name: index_refresh_tokens_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_refresh_tokens_on_user_id ON public.refresh_tokens USING btree (user_id);
+
+
+--
 -- Name: index_rule_overrides_on_created_by_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1571,6 +1730,14 @@ ALTER TABLE ONLY public.tax_scenarios
 
 
 --
+-- Name: audit_logs fk_rails_1f26bc34ae; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs
+    ADD CONSTRAINT fk_rails_1f26bc34ae FOREIGN KEY (user_id) REFERENCES public.users(id);
+
+
+--
 -- Name: document_items fk_rails_25c6116f60; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1592,6 +1759,14 @@ ALTER TABLE ONLY public.document_items
 
 ALTER TABLE ONLY public.fiscal_files
     ADD CONSTRAINT fk_rails_26e5efeb30 FOREIGN KEY (client_id) REFERENCES public.clients(id);
+
+
+--
+-- Name: refresh_tokens fk_rails_279e9a0091; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.refresh_tokens
+    ADD CONSTRAINT fk_rails_279e9a0091 FOREIGN KEY (user_id) REFERENCES public.users(id);
 
 
 --
@@ -1664,6 +1839,14 @@ ALTER TABLE ONLY public.upload_batches
 
 ALTER TABLE ONLY public.documents
     ADD CONSTRAINT fk_rails_8d4923cd3f FOREIGN KEY (upload_batch_id) REFERENCES public.upload_batches(id);
+
+
+--
+-- Name: audit_logs fk_rails_9abbf29b4c; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs
+    ADD CONSTRAINT fk_rails_9abbf29b4c FOREIGN KEY (firm_id) REFERENCES public.firms(id);
 
 
 --
@@ -1793,5 +1976,7 @@ ALTER TABLE ONLY public.findings
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260830000002'),
+('20260830000001'),
 ('20260829000001');
 

@@ -53,7 +53,11 @@ module Rules
         emit(r, ctx, document_id:, item_number:)
       end
     rescue EvaluationError => e
-      @errors << { rule_code: d["code"], version: d["version"], document_id:, item_number:, error: e.message }
+      # deduplicado por regra+mensagem: um lookup em tabela ausente geraria um erro por item
+      existing = @errors.find { |x| x[:rule_code] == d["code"] && x[:error] == e.message }
+      if existing then existing[:count] += 1
+      else @errors << { rule_code: d["code"], version: d["version"], document_id:, item_number:, error: e.message, count: 1 }
+      end
     end
 
     def emit(r, ctx, document_id:, item_number:, extra_evidence: {})

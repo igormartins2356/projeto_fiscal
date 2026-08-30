@@ -2,6 +2,7 @@ module Api
   module V1
     # Listagem paginada server-side (DataTable lazy): page, per_page, sort_field, sort_order, filtros por coluna.
     class FindingsController < BaseController
+      before_action :require_client!
       SORTABLE = %w[rule_code severity state item_number created_at].freeze
 
       def index

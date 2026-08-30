@@ -15,7 +15,10 @@ module Audit
       docs = client.documents.fiscal.in_period(@run.period_start, @run.period_end).includes(:items)
       canonicals = docs.map { |d| d.canonical.merge("_id" => d.id) }
       canonicals.each { |c| engine.evaluate_document(c) }
-      engine.evaluate_period({ "documents" => canonicals, "invalidations" => [], "events" => [] })
+      invalidations = client.documents.where(kind: "invalidation").map { |d| d.data["invalidation"] }
+      events = client.documents.where(kind: "event").where(target_access_key: canonicals.map { |c| c["access_key"] }).map { |d| d.data }
+      stats = Audit::Stats.new(canonicals)
+      engine.evaluate_period({ "documents" => canonicals, "invalidations" => invalidations, "events" => events }, stats:)
 
       persist(engine)
       @run.update!(state: "done", finished_at: Time.current, documents_count: docs.size, findings_count: engine.findings.size,

@@ -4,6 +4,7 @@ module Rules
     STATES = %w[draft testing shadow published retired].freeze
     SEVERITIES = %w[error warning info].freeze
 
+    belongs_to :created_by, class_name: "Accounts::User", optional: true
     has_many :test_cases, class_name: "Rules::RuleTestCase", foreign_key: :rule_id, dependent: :destroy
     validates :code, :title, :effective_from, presence: true
     validates :version, uniqueness: { scope: :code }

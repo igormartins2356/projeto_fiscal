@@ -18,7 +18,9 @@ module Rules
         catalog = ctx["catalog"] or raise EvaluationError, "no catalog in context"
         key = Array(spec["key"]).map { |k| Value.resolve(k, ctx) }
         return Path::ABSENT if key.any? { |k| Path.absent?(k) || k.nil? }
-        catalog.lookup(spec["lookup"], key) || Path::ABSENT
+        catalog.lookup(spec["lookup"], key, strict: true) || Path::ABSENT
+      rescue Catalog::Lookup::TableUnavailable => e
+        raise EvaluationError, e.message
       end
     end
   end

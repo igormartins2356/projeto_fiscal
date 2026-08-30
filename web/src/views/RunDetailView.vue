@@ -1,4 +1,5 @@
 <script>
+import PageHeader from '../components/PageHeader.vue'
 import { reactive } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import Button from 'primevue/button'
@@ -28,7 +29,7 @@ const EXPORT_COLUMNS = [
 
 export default {
   name: 'RunDetailView',
-  components: { Button, Select, InputText, Message, Dialog, Textarea, DataTable, Column, SeverityTag },
+  components: { PageHeader, Button, Select, InputText, Message, Dialog, Textarea, DataTable, Column, SeverityTag },
   props: { id: { type: String, required: true } },
   // setup() só registra as queries/mutations do Vue Query; o restante é Options API.
   setup(props) {
@@ -112,22 +113,24 @@ export default {
 </script>
 
 <template>
-  <div v-if="run.data" class="space-y-5">
-    <div class="flex items-baseline gap-4">
-      <h1 class="text-xl font-semibold">Auditoria #{{ run.data.id }}</h1>
-      <span class="text-sm text-slate-500">{{ run.data.period_start }} → {{ run.data.period_end }} · {{ run.data.documents_count }} documentos · {{ run.data.state }}</span>
-      <div class="ml-auto flex gap-2">
-        <Button label="CSV" severity="secondary" size="small" :disabled="!total" @click="exportCsv" />
-        <Button label="XLSX" severity="secondary" size="small" :disabled="!total" @click="exportXlsx" />
-        <Button label="Atualizar" severity="secondary" size="small" @click="refresh" />
-      </div>
-    </div>
+  <div v-if="run.data">
+    <PageHeader :title="`Auditoria #${run.data.id}`" :subtitle="`${run.data.period_start} → ${run.data.period_end} · ${run.data.documents_count} documentos · ${run.data.state}`">
+      <template #actions>
+        <Button label="CSV" icon="pi pi-file" severity="secondary" outlined size="small" :disabled="!total" @click="exportCsv" />
+        <Button label="XLSX" icon="pi pi-file-excel" severity="secondary" outlined size="small" :disabled="!total" @click="exportXlsx" />
+        <Button icon="pi pi-refresh" severity="secondary" outlined size="small" aria-label="Atualizar" @click="refresh" />
+      </template>
+    </PageHeader>
     <Message v-if="run.data.state === 'failed'" severity="error">A auditoria falhou: {{ run.data.evaluation_errors?.[0]?.fatal }}</Message>
     <Message v-else-if="run.data.evaluation_errors?.length" severity="warn">{{ run.data.evaluation_errors.length }} regra(s) com erro de avaliação (ver painel admin).</Message>
-    <div class="flex gap-3">
-      <span v-for="(n, sev) in run.data.summary" :key="sev" class="inline-flex items-center gap-1 text-sm"><SeverityTag :severity="sev" /> {{ n }}</span>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div v-for="sev in ['error', 'warning', 'info']" :key="sev" class="card !mb-0 stat-card">
+        <div class="flex items-start justify-between"><span class="stat-label">{{ { error: 'Erros', warning: 'Alertas', info: 'Informativos' }[sev] }}</span><span :class="['stat-icon', { error: 'bg-red-100 text-red-500', warning: 'bg-orange-100 text-orange-500', info: 'bg-blue-100 text-blue-500' }[sev]]"><i :class="['pi', { error: 'pi-times-circle', warning: 'pi-exclamation-triangle', info: 'pi-info-circle' }[sev]]"></i></span></div>
+        <span class="stat-value">{{ run.data.summary?.[sev] ?? 0 }}</span>
+      </div>
     </div>
 
+    <div class="card">
     <DataTable :value="rows" :loading="loading" lazy paginator :first="first" :rows="lazy.per_page" :totalRecords="total" :rowsPerPageOptions="[10, 25, 50, 100]"
                :sortField="lazy.sort_field" :sortOrder="lazy.sort_order" dataKey="id" v-model:expandedRows="expanded" filterDisplay="row"
                @page="onPage" @sort="onSort">
@@ -167,8 +170,9 @@ export default {
           </div>
         </div>
       </template>
-      <template #empty>Nenhum apontamento{{ done ? '' : ' (auditoria em processamento)' }}.</template>
+      <template #empty><div class="empty-state"><i class="pi pi-check-circle"></i>Nenhum apontamento{{ done ? '' : ' (auditoria em processamento)' }}.</div></template>
     </DataTable>
+    </div>
 
     <Dialog v-model:visible="dialog.visible" modal :header="`Marcar como ${stateLabel(dialog.state)}`">
       <p class="text-slate-600 mb-3">{{ dialog.finding?.message }}</p>
@@ -180,5 +184,5 @@ export default {
       </template>
     </Dialog>
   </div>
-  <p v-else class="text-slate-500 text-sm">Carregando…</p>
+  <div v-else class="card text-secondary">Carregando…</div>
 </template>

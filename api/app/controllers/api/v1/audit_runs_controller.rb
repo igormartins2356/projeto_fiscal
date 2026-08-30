@@ -1,6 +1,7 @@
 module Api
   module V1
     class AuditRunsController < BaseController
+      before_action :require_client!
       def index
         render json: current_client.audit_runs.order(created_at: :desc).limit(50)
       end

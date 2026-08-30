@@ -1,17 +1,19 @@
 module Api
   module V1
-    # TODO(auth): JWT + current_user/current_firm. No MVP inicial usa header X-Client-Id apenas em dev.
+    # Tudo aqui exige usuário autenticado. Recursos por cliente usam `current_client`, sempre dentro da firma do usuário.
     class BaseController < ApplicationController
-      before_action :require_client
+      before_action :authenticate!
 
       private
 
+      def firm_clients = Accounts::Client.where(firm_id: current_firm.id)
+
       def current_client
-        @current_client ||= Accounts::Client.find_by(id: request.headers["X-Client-Id"] || params[:client_id])
+        @current_client ||= firm_clients.find_by(id: request.headers["X-Client-Id"] || params[:client_id])
       end
 
-      def require_client
-        render json: { error: "client not found (X-Client-Id)" }, status: :unauthorized unless current_client
+      def require_client!
+        render json: { error: "cliente não informado ou não pertence à sua firma (X-Client-Id)" }, status: :unprocessable_entity unless current_client
       end
     end
   end

@@ -24,6 +24,7 @@ module Ingestion
       xml_ref = @storage.store(client: @client, hash:, xml:, filename:)
       doc = persist(canonical, xml_ref)
       apply_event(doc) if doc.kind == "event"
+      Ingestion::ReferenceResolver.new(@client).call(doc)
       Result.new(document: doc, status: :created)
     end
 

@@ -1,6 +1,7 @@
 module Api
   module V1
     class UploadsController < BaseController
+      before_action :require_client!
       def create
         file = params.require(:file)
         ref = "#{current_client.id}/#{SecureRandom.uuid}#{File.extname(file.original_filename)}"

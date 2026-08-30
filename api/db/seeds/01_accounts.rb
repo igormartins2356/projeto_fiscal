@@ -1,6 +1,6 @@
 firm = Accounts::Firm.find_or_create_by!(name: "Escritório Piloto") { |f| f.cnpj = "11111111000111" }
 Accounts::User.find_or_create_by!(email: "admin@fiscal.local") do |u|
-  u.firm = firm; u.name = "Admin"; u.password = "password"; u.role = "platform_admin"
+  u.firm = firm; u.name = "Admin"; u.password = "password123"; u.role = "platform_admin"
 end
 client = Accounts::Client.find_or_create_by!(firm:, cnpj: "12345678000190") do |c|
   c.legal_name = "Cliente Exemplo Ltda"; c.uf = "SP"; c.city_code = "3550308"

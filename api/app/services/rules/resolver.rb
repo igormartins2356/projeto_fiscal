@@ -29,7 +29,7 @@ module Rules
         disabled = false
         (firm_ov + client_ov).each do |ov|
           ids << ov.id
-          case ov.action
+          case ov.override_action
           when "disable" then disabled = true
           when "enable" then disabled = false if ov.source_type == "client"
           when "adjust"

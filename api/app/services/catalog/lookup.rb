@@ -13,13 +13,21 @@ module Catalog
 
     attr_reader :versions_used
 
+    class TableUnavailable < StandardError; end
+
     # Retorna Hash com os dados da linha (+ "_source") ou nil.
-    def lookup(table_code, key)
+    # strict: true (usado pela DSL) levanta TableUnavailable quando a tabela não tem versão vigente na data —
+    # assim a regra vira evaluation_error em vez de apontar erro ao contador por falta de dado.
+    def lookup(table_code, key, strict: false)
       key = Array(key).map(&:to_s)
       override = @overrides_enabled ? find_override(table_code, key) : nil
       return override if override
 
-      table = table_for(table_code) or return nil
+      table = table_for(table_code)
+      if table.nil?
+        raise TableUnavailable, "tabela '#{table_code}' sem versão publicada vigente em #{@date}" if strict
+        return nil
+      end
       table[:rows][key]
     end
 

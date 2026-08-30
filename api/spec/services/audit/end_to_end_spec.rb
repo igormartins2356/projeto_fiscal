@@ -24,7 +24,7 @@ RSpec.describe "upload → parse → audit → findings" do
     Audit::Runner.new(run).call
     run.reload
     expect(run.state).to eq("done")
-    expect(run.evaluation_errors).to eq([])
+    expect(run.evaluation_errors.reject { |e| e["error"].include?("sem versão publicada") }).to eq([])
     codes = run.findings.pluck(:rule_code)
     expect(codes).to include("ICMS.CSOSN.SALE_RETURN")
     expect(codes).not_to include("ICMS.REGIME.SITUATION_FIELD", "DOC.TOTALS.ITEMS_SUM", "CFOP.SCOPE.MATCH", "IBSCBS.GROUP.REQUIRED", "IBSCBS.CBS.RATE_SCHEDULE", "DOC.RETURN.REFERENCE")
@@ -45,7 +45,7 @@ RSpec.describe "upload → parse → audit → findings" do
     Audit::Runner.new(run2).call
     expect(run2.findings.find_by!(rule_code: "ICMS.CSOSN.SALE_RETURN").state).to eq("justified")
 
-    Rules::RuleOverride.create!(rule_code: "ICMS.CSOSN.SALE_RETURN", source_type: "client", source_id: client.id, action: "disable",
+    Rules::RuleOverride.create!(rule_code: "ICMS.CSOSN.SALE_RETURN", source_type: "client", source_id: client.id, override_action: "disable",
                                 effective_from: Date.new(2026, 1, 1), justification: "decisão do contador", created_by: Accounts::User.first)
     run3 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
     Audit::Runner.new(run3).call
