@@ -7,7 +7,7 @@
         <dhEmi>2026-03-14T10:22:00-03:00</dhEmi><tpNF>0</tpNF><idDest>1</idDest><cMunFG>3550308</cMunFG>
         <tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>5</cDV><tpAmb>1</tpAmb><finNFe>4</finNFe><indFinal>0</indFinal><indPres>0</indPres>
         <procEmi>0</procEmi><verProc>ERP 1.0</verProc>
-        <NFref><refNFe>35260299887766000155550010000009991000009999</refNFe></NFref>
+        <NFref><refNFe>35260312345678000190550010000009991000009999</refNFe></NFref>
       </ide>
       <emit>
         <CNPJ>12345678000190</CNPJ><xNome>Cliente Exemplo Ltda</xNome>

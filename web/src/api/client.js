@@ -60,6 +60,11 @@ export const uploads = {
   create: (file) => { const f = new FormData(); f.append('file', file); return api.post('/uploads', f).then(r => r.data) },
   get: (id) => api.get(`/uploads/${id}`).then(r => r.data),
 }
+export const fiscalFiles = {
+  list: () => api.get('/fiscal_files').then(r => r.data),
+  get: (id) => api.get(`/fiscal_files/${id}`).then(r => r.data),
+  create: (file) => { const f = new FormData(); f.append('file', file); return api.post('/fiscal_files', f) },
+}
 export const auditRuns = {
   list: () => api.get('/audit_runs').then(r => r.data),
   get: (id) => api.get(`/audit_runs/${id}`).then(r => r.data),
@@ -67,6 +72,14 @@ export const auditRuns = {
   findings: (id, params = {}) => api.get(`/audit_runs/${id}/findings`, { params }).then(r => r.data),
 }
 export const findings = { update: (id, params) => api.patch(`/findings/${id}`, params).then(r => r.data) }
+export async function downloadAuditReport(runId) {
+  const res = await api.get(`/audit_runs/${runId}/report.pdf`, { responseType: 'blob' })
+  const name = /filename="?([^";]+)/.exec(res.headers['content-disposition'] ?? '')?.[1] ?? `auditoria-${runId}.pdf`
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url; a.download = name; a.click()
+  URL.revokeObjectURL(url)
+}
 
 export function errorMessage(e) { return e?.response?.data?.error ?? e?.message ?? 'erro inesperado' }
 

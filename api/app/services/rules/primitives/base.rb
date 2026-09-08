@@ -11,9 +11,12 @@ module Rules
       end
       def self.scope(s = nil) = s ? (@scope = s) : @scope
       def self.params_schema(h = nil) = h ? (@params_schema = h) : (@params_schema || {})
+      # Variáveis que a primitiva expõe em `vars` (usáveis em message/group_by); usado pela validação estática
+      def self.vars(*names) = names.any? ? (@vars = names.map(&:to_s)) : (@vars || [])
 
       def initialize(params, ctx)
-        @params = (self.class.params_schema.transform_values { |v| v[:default] }).merge(params || {})
+        defaults = self.class.params_schema.to_h { |k, v| [k.to_s, v[:default]] }
+        @params = defaults.merge((params || {}).transform_keys(&:to_s))
         @ctx = ctx
       end
 

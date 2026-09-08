@@ -10,7 +10,7 @@ RSpec.describe Ingestion::Nfe::Parser do
     expect(doc["operation"]).to include("direction_declared" => "inbound", "scope" => "intrastate", "final_consumer" => false)
     expect(doc["issuer"]).to include("cnpj" => "12345678000190", "crt" => "1", "uf" => "SP")
     expect(doc["recipient"]).to include("ie_indicator" => "taxpayer")
-    expect(doc["references"].first).to include("kind" => "nfe", "access_key" => "35260299887766000155550010000009991000009999")
+    expect(doc["references"].first).to include("kind" => "nfe", "access_key" => "35260312345678000190550010000009991000009999")
     expect(doc["totals"]).to include("products" => "1000.00", "total" => "1000.00")
     expect(doc["protocol"]).to include("status_code" => "100")
     expect(doc["layout_groups"]).to include("ibs_cbs", "payment")

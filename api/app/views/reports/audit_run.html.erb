@@ -1,0 +1,56 @@
+<div class="brandbar">
+  <div class="firm"><%= @firm.name %></div>
+  <div class="sub">Relatório de auditoria fiscal · gerado pelo Validador Fiscal a partir dos XMLs</div>
+</div>
+
+<h1 style="margin-top:16px"><%= @client.legal_name %></h1>
+<div class="muted">CNPJ <%= @client.cnpj.gsub(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '\1.\2.\3/\4-\5') %> · Período <%= l(@run.period_start) rescue @run.period_start.strftime("%d/%m/%Y") %> a <%= @run.period_end.strftime("%d/%m/%Y") %> · Auditoria nº <%= @run.id %></div>
+
+<table class="cards" cellspacing="6"><tr>
+  <td><div class="stat"><%= @docs_stats[:total] %></div><div class="stat-label">Documentos no período</div></td>
+  <td><div class="stat"><%= @docs_stats[:cancelled] %></div><div class="stat-label">Cancelados</div></td>
+  <td><div class="stat" style="color:#b91c1c"><%= @by_severity["error"] || 0 %></div><div class="stat-label">Erros</div></td>
+  <td><div class="stat" style="color:#c2410c"><%= @by_severity["warning"] || 0 %></div><div class="stat-label">Alertas</div></td>
+</tr></table>
+
+<h2>Resumo executivo</h2>
+<table>
+  <tr><th>Apontamento</th><th style="width:60px">Severidade</th><th style="width:50px">Itens/Notas</th><th style="width:110px">Situação</th></tr>
+  <% @groups.each do |g| %>
+    <tr>
+      <td><b><%= g[:rule].title %></b><div class="muted mono"><%= g[:code] %><%= g[:source] != "platform" ? " · parametrização do escritório" : "" %></div></td>
+      <td><span class="sev sev-<%= g[:severity] %>"><%= { "error" => "erro", "warning" => "alerta", "info" => "info" }[g[:severity]] %></span></td>
+      <td><%= g[:count] %></td>
+      <td class="muted"><%= g[:states].map { |s, n| "#{{ "open" => "aberto", "justified" => "justificado", "false_positive" => "falso positivo", "fixed" => "corrigido", "ignored" => "ignorado" }[s] || s}: #{n}" }.join(" · ") %></td>
+    </tr>
+  <% end %>
+  <% if @groups.empty? %><tr><td colspan="4" class="muted">Nenhum apontamento no período. ✔</td></tr><% end %>
+</table>
+
+<h2>Detalhamento</h2>
+<% @groups.each do |g| %>
+  <div class="rule">
+    <h3><span class="sev sev-<%= g[:severity] %>"><%= g[:count] %></span> &nbsp;<%= g[:rule].title %> <span class="muted mono"><%= g[:code] %></span></h3>
+    <% if g[:rule].body["explanation"].present? %><div class="muted" style="margin:4px 0"><%= g[:rule].body["explanation"] %></div><% end %>
+    <% if (refs = Array(g[:rule].body["legal_references"])).any? %><div class="muted" style="font-size:8px">Base legal: <%= refs.map { |r| r["label"] }.join("; ") %></div><% end %>
+    <% if g[:top_groups].any? { |t| t[:key].present? } %>
+      <table style="margin-top:6px"><tr><th>Padrão mais frequente</th><th style="width:60px">Ocorrências</th></tr>
+      <% g[:top_groups].each do |t| %><tr><td class="mono"><%= t[:sample].message.truncate(160) %></td><td><%= t[:count] %></td></tr><% end %>
+      </table>
+    <% end %>
+    <table style="margin-top:6px"><tr><th style="width:90px">Nota</th><th style="width:32px">Item</th><th>Apontamento</th></tr>
+      <% g[:samples].each do |f| %>
+        <tr>
+          <td class="mono"><%= f.document ? "#{f.document.number}/#{f.document.series}" : "—" %></td>
+          <td><%= f.item_number || "—" %></td>
+          <td><%= f.message.truncate(220) %></td>
+        </tr>
+      <% end %>
+      <% if g[:count] > g[:samples].size %><tr><td colspan="3" class="muted">… e mais <%= g[:count] - g[:samples].size %> ocorrência(s) no painel.</td></tr><% end %>
+    </table>
+  </div>
+<% end %>
+
+<div class="disclaimer">
+  Relatório gerado automaticamente a partir dos XMLs autorizados apresentados, com as regras e tabelas fiscais vigentes nas datas de emissão (auditoria nº <%= @run.id %>; regras versionadas — a relação completa pode ser fornecida sob demanda). Este documento apoia a revisão fiscal e não substitui a análise profissional do contador responsável. Emitido por <%= @firm.name %>.
+</div>

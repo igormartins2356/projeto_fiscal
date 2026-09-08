@@ -1,3 +1,4 @@
+load Rails.root.join("db/seeds/00_helpers.rb") unless respond_to?(:seed_table!, true) && respond_to?(:seed_rule!, true)
 # Regras adicionais (ARQUITETURA.md §11). Todas dado; reutiliza seed_rule! de 03_rules.rb.
 issuer = { "field" => "doc.role", "op" => "eq", "value" => "issuer" }
 simples = { "field" => "scenario.tax_regime", "op" => "in", "value" => %w[simples_nacional simples_nacional_excess mei] }
@@ -5,12 +6,12 @@ normal_regime = { "field" => "scenario.tax_regime", "op" => "in", "value" => %w[
 goods = { "field" => "item.is_service", "op" => "eq", "value" => false }
 
 seed_rule!("PISCOFINS.CST.REGIME", title: "CST de PIS/COFINS × regime", scope: "item", severity: "error", effective_from: Date.new(2010, 1, 1), effective_until: Date.new(2026, 12, 31), tags: %w[pis cofins regime],
-  applies_when: { "all" => [issuer, goods, { "field" => "item.pis.cst", "op" => "present" }] },
+  applies_when: { "all" => [issuer, goods, { "field" => "item.pis.cst", "op" => "present" }, { "field" => "doc.operation.direction_declared", "op" => "eq", "value" => "outbound" }] },
   assert: { "if" => { "field" => "scenario.pis_cofins.regime", "op" => "eq", "value" => "simples" },
-            "then" => { "field" => "item.pis.cst", "op" => "in", "value" => %w[49 99 08 07] },
+            "then" => { "field" => "item.pis.cst", "op" => "in", "value" => %w[49 04 06 07 08] },
             "else" => { "any" => [{ "field" => "item.pis.cst", "op" => "in", "value" => %w[01 02 03] }, { "field" => "item.pis.taxation_kind", "op" => "in", "value" => %w[single_phase zero_rate exempt no_incidence suspended st] }] } },
   message: "PIS CST {{item.pis.cst}} incompatível com o regime de PIS/COFINS do cenário ({{scenario.pis_cofins.regime}}).",
-  explanation: "Optantes do Simples informam CST 49 (outras) nas saídas; regime normal usa 01 (tributável) salvo monofásicos, alíquota zero, isenção ou suspensão.",
+  explanation: "Optantes do Simples informam CST 49 (outras) nas saídas — ou 04/06 quando revendem monofásicos/alíquota zero com receita segregada; regime normal usa 01 (tributável) salvo monofásicos, alíquota zero, isenção ou suspensão.",
   group_by: ["item.pis.cst"])
 
 seed_rule!("PISCOFINS.RATE.REGIME", title: "Alíquotas de PIS/COFINS × regime cumulativo/não cumulativo", scope: "item", severity: "error", effective_from: Date.new(2010, 1, 1), effective_until: Date.new(2026, 12, 31), tags: %w[pis cofins],
@@ -80,7 +81,8 @@ seed_rule!("CEST.REQUIRED", title: "CEST ausente em NCM sujeito a ST", scope: "i
   legal_references: [{ "label" => "Convênio ICMS 142/2018" }], group_by: ["item.product.ncm"])
 
 seed_rule!("ICMS.ST.CATALOG", title: "ST destacada/retida em NCM sem ST na UF (ou ausente quando devida)", scope: "item", severity: "warning", effective_from: Date.new(2010, 1, 1), tags: %w[icms st],
-  applies_when: { "all" => [issuer, goods, { "field" => "item.st_applicable_by_catalog", "op" => "present" }, { "field" => "doc.operation.direction", "op" => "eq", "value" => "outbound" }] },
+  applies_when: { "all" => [issuer, goods, { "field" => "item.st_applicable_by_catalog", "op" => "present" }, { "field" => "doc.operation.direction", "op" => "eq", "value" => "outbound" },
+                            { "field" => "doc.recipient.ie_indicator", "op" => "eq", "value" => "taxpayer" }, { "field" => "doc.operation.final_consumer", "op" => "eq", "value" => false }] },
   assert: { "if" => { "field" => "item.st_applicable_by_catalog", "op" => "eq", "value" => true },
             "then" => { "any" => [{ "field" => "item.icms.taxation_kind", "op" => "in", "value" => %w[taxed_with_st st_withheld exempt_with_st reduced_base_with_st simples_with_credit_st simples_without_credit_st] }, { "field" => "item.icms_st.highlights_st", "op" => "eq", "value" => true }] },
             "else" => { "all" => [{ "field" => "item.icms.taxation_kind", "op" => "not_in", "value" => %w[taxed_with_st st_withheld] }] } },
@@ -98,12 +100,25 @@ seed_rule!("DOC.NUMBERING.GAP", title: "Lacuna de numeração sem inutilização
   primitive: { "name" => "numbering_gap", "params" => { "max_gap_ignored" => 0, "consider_invalidations" => true } },
   message: "Série {{series}} (modelo {{model}}): {{missing_count}} número(s) faltando entre {{missing_from}} e {{missing_to}} sem inutilização correspondente.")
 
-seed_rule!("DOC.RETURN.ORIGINAL", title: "Devolução sem original na base ou excedendo a quantidade original", scope: "cross_document", severity: "error", effective_from: Date.new(2010, 1, 1), tags: %w[return],
-  primitive: { "name" => "return_references_original", "params" => { "require_resolved" => true, "compare" => "quantity", "tolerance" => "0.0001" } },
-  message: "Devolução: {{problem}} — original {{referenced_access_key}}{{original_access_key}} produto {{product_code}} (devolvido {{returned_quantity}} de {{original_quantity}}).")
+retire_rule!("DOC.RETURN.ORIGINAL", "dividida em DOC.RETURN.ORIGINAL_MISSING, DOC.RETURN.EXCEEDS_ORIGINAL e DOC.RETURN.MIRROR")
+
+seed_rule!("DOC.RETURN.ORIGINAL_MISSING", title: "Devolução de venda referencia nota do próprio cliente que não está na base", scope: "cross_document", severity: "warning", effective_from: Date.new(2010, 1, 1), tags: %w[return],
+  primitive: { "name" => "return_references_original", "params" => { "check" => "missing" } },
+  message: "Devolução referencia a NF-e {{referenced_access_key}} (emitida pelo próprio cliente), que não foi enviada. Envie o período da venda para validar o espelhamento.",
+  explanation: "Sem a nota original não é possível conferir CST/CSOSN, alíquotas, CFOP e quantidades devolvidas.")
+
+seed_rule!("DOC.RETURN.EXCEEDS_ORIGINAL", title: "Quantidade devolvida (acumulada) maior que a vendida", scope: "cross_document", severity: "error", effective_from: Date.new(2010, 1, 1), tags: %w[return],
+  primitive: { "name" => "return_references_original", "params" => { "check" => "exceeds", "tolerance" => "0.0001" } },
+  message: "Produto {{product_code}}: devolvido {{returned_quantity}} de {{original_quantity}} vendido na NF-e {{original_access_key}}.")
+
+seed_rule!("DOC.RETURN.MIRROR", title: "Devolução de venda não espelha a tributação/CFOP da nota original", scope: "cross_document", severity: "error", effective_from: Date.new(2010, 1, 1), tags: %w[return icms],
+  primitive: { "name" => "return_references_original", "params" => { "check" => "mirror", "mirror_fields" => %w[icms.situation_code icms.rate pis.cst cofins.cst] } },
+  message: "Devolução da NF-e {{original_access_key}}, produto {{product_code}}: {{field}} = {{found}}, mas a original tem {{expected}}. A devolução espelha a venda (mesmo CST/CSOSN, alíquotas e CFOP de devolução correspondente).",
+  explanation: "Na devolução de venda emitida pelo vendedor (NF-e de entrada, finNFe=4, CFOP 1.20x/2.20x referenciando a venda), a tributação reproduz a da nota original: Simples devolve com o mesmo CSOSN (101/102...) sem destaque; regime normal repete o CST e destaca o ICMS para recuperar o crédito. O CSOSN 900 aplica-se à devolução de COMPRA (destaque do ICMS do fornecedor), não à de venda. CFOP: 5.101→1.201, 5.102→1.202, 5.401→1.410, 5.403/5.405→1.411 (e 2.xxx para interestaduais).",
+  legal_references: [{ "label" => "Ajuste SINIEF 07/05 (finNFe 4 e NFref)" }, { "label" => "Ajuste SINIEF s/nº 1970, Anexo — CFOP 1.201/1.202/1.410/1.411" }, { "label" => "RICMS/SP art. 57 (crédito na devolução)" }])
 
 seed_rule!("SCENARIO.ST.DISAGREEMENT", title: "Cenário sem ST, mas as notas destacam ST", scope: "scenario", severity: "warning", effective_from: Date.new(2010, 1, 1), tags: %w[scenario st],
-  primitive: { "name" => "scenario_field_disagreement", "params" => { "field" => "st.applies_any", "when_field_is" => false, "threshold" => "0.2",
+  primitive: { "name" => "scenario_field_disagreement", "params" => { "field" => "st.applies", "when_field_is" => false, "threshold" => "0.2",
     "evidence" => { "any" => [{ "field" => "item.icms_st.highlights_st", "op" => "eq", "value" => true }, { "field" => "item.icms.situation_code", "op" => "in", "value" => %w[60 500 10 30 70 201 202 203] }] } } },
   message: "{{share_pct}}% dos itens ({{matching_items}} de {{total_items}}) têm ST destacada ou retida, mas o cenário indica que o cliente não opera com ST. Revise o cenário.")
 

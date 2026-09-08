@@ -9,6 +9,9 @@ module Rules
       @errors = []
       @warnings = []
       @vars = %w[params] + Array(@d["let"]).map { |l| l["as"] }.compact
+      if (name = @d.dig("primitive", "name"))
+        @vars += (Primitives::Base.find(name).vars rescue [])
+      end
     end
 
     def valid?

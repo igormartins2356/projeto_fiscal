@@ -1,55 +1,79 @@
 require "net/http"
-require "openssl"
 
 module Catalog
   module Importers
-    # Tabela cClassTrib × CST IBS/CBS (classe A). Fonte: API SVRS (certificado ICP-Brasil, env SVRS_CERT_P12/SVRS_CERT_PASSWORD)
-    # ou arquivo JSON baixado do portal (upload). Tolerante a variações de nome de campo entre versões do IT.
+    # Tabela cClassTrib × CST IBS/CBS (classe A). Fontes, em ordem:
+    # 1) JSON já extraído (upload/arquivo) — aceita o formato da API (lista plana) ou o `dadosOriginais` da página pública
+    # 2) Página pública da SVRS (sem certificado): extrai `var dadosOriginais = [...]`
     class IbsCbsClass
-      API = "https://cff.svrs.rs.gov.br/api/v1/consultas/classTrib"
+      PAGE = "https://dfe-portal.svrs.rs.gov.br/DFE/ClassificacaoTributaria"
 
-      def initialize(table = Catalog::ReferenceTable.find_or_create_by!(code: "ibs_cbs_class") { |t| t.name = "Classificação tributária IBS/CBS (cClassTrib)"; t.key_names = ["class_code"]; t.key_arity = 1; t.source_class = "A"; t.source_url = API })
+      def initialize(table = Catalog::ReferenceTable.find_or_create_by!(code: "ibs_cbs_class") { |t| t.name = "Classificação tributária IBS/CBS (cClassTrib)"; t.key_names = ["class_code"]; t.key_arity = 1; t.source_class = "A"; t.source_url = PAGE })
         @table = table
       end
 
       def call(json: nil, user: nil)
-        payload = json || fetch_api
-        list = payload.is_a?(Array) ? payload : (payload["data"] || payload["classTrib"] || payload["items"] || payload.values.find { |v| v.is_a?(Array) } || [])
-        rows = list.filter_map do |e|
-          e = e.to_h.transform_keys { |k| k.to_s.downcase }
-          code = (e["cclasstrib"] || e["codigo"] || e["code"]).to_s.rjust(6, "0")
-          next if code.blank? || code == "000000" && e["cclasstrib"].nil?
-          cst = (e["cst"] || e["cstibscbs"] || e["cst_ibs_cbs"]).to_s.rjust(3, "0")
-          { key: [code], data: { "cst" => cst, "description" => (e["descricao"] || e["description"] || e["nome"]).to_s.strip, "reduction_pct" => (e["predaliq"] || e["percentualreducao"] || e["reduction_pct"])&.to_s,
-                                "indicators" => e.slice("indop", "indnfe", "indnfce", "indcte", "indnfse", "indpresenca").compact, "legal_basis" => (e["baselegal"] || e["fundamentacaolegal"] || e["legal_basis"]).to_s.presence },
-            effective_from: parse_date(e["datainicio"] || e["vigenciainicio"] || e["effective_from"]), effective_until: parse_date(e["datafim"] || e["vigenciafim"] || e["effective_until"]),
-            legal_basis: (e["baselegal"] || e["fundamentacaolegal"]).to_s.presence }
-        end
+        payload = json || fetch_page
+        rows = payload.first.is_a?(Hash) && payload.first.key?("ClassificacoesTributarias") ? parse_grouped(payload) : parse_flat(payload)
         last = @table.versions.order(version: :desc).first
-        version = @table.versions.create!(version: (last&.version || 0) + 1, effective_from: [rows.filter_map { |r| r[:effective_from] }.min, Date.new(2026, 1, 1)].compact.min, state: "draft", source_url: json ? "upload" : API, imported_by: user, notes: "#{rows.size} classificações")
+        version = @table.versions.create!(version: (last&.version || 0) + 1, effective_from: [rows.filter_map { |r| r[:effective_from] }.min, Date.new(2026, 1, 1)].compact.min,
+                                          state: "draft", source_url: json ? "upload" : PAGE, imported_by: user, notes: "#{rows.size} classificações (formato SVRS)")
         Catalog::ReferenceRow.insert_all!(rows.map { |r| r.merge(reference_version_id: version.id) }) if rows.any?
         { version:, imported: rows.size }
       end
 
       private
 
-      def fetch_api
-        p12_path, password = ENV["SVRS_CERT_P12"], ENV["SVRS_CERT_PASSWORD"]
-        raise ArgumentError, "SVRS_CERT_P12 não configurado; envie o JSON baixado do portal" if p12_path.blank?
-        p12 = OpenSSL::PKCS12.new(File.binread(p12_path), password)
-        uri = URI(API)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = true
-        http.cert = p12.certificate
-        http.key = p12.key
-        res = http.get(uri.request_uri, { "Accept" => "application/json" })
+      # Formato da página/agrupado: [{Cst:, NomeCst:, Ind..., ClassificacoesTributarias: [{CodClassTrib:, ...}]}]
+      def parse_grouped(data)
+        data.flat_map do |cst_group|
+          Array(cst_group["ClassificacoesTributarias"]).map do |k|
+            { key: [k["CodClassTrib"].to_s.rjust(6, "0")],
+              data: { "cst" => cst_group["Cst"].to_s.rjust(3, "0"), "cst_name" => cst_group["NomeCst"],
+                      "description" => k["NomeClassTrib"].to_s.strip, "short_name" => k["NomeReduzido"],
+                      "reduction_ibs_pct" => k["PercRedIbs"]&.to_s, "reduction_cbs_pct" => k["PercRedCbs"]&.to_s,
+                      "indicators" => { "nfe" => k["IndNfe"], "nfce" => k["IndNfce"], "cte" => k["IndCte"], "nfse" => k["IndNfse"],
+                                        "trib_regular" => k["IndTribRegular"], "cred_pres" => k["IndPermiteCredPres"], "mono_retem" => k["IndMonoRetem"] }.compact,
+                      "annex" => k["NroAnexo"], "legal_basis" => k["TexUrlLegislacao"].to_s.presence },
+              effective_from: parse_date(k["DthIniVig"]), effective_until: parse_date(k["DthFimVig"]),
+              legal_basis: k["TexUrlLegislacao"].to_s.presence }
+          end
+        end
+      end
+
+      def parse_flat(list)
+        list.map do |e|
+          e = e.to_h.transform_keys { |x| x.to_s.downcase }
+          code = (e["cclasstrib"] || e["codclasstrib"] || e["codigo"] || e["code"]).to_s.rjust(6, "0")
+          { key: [code], data: { "cst" => (e["cst"] || "").to_s.rjust(3, "0"), "description" => (e["nomeclasstrib"] || e["descricao"] || e["description"]).to_s.strip,
+                                 "reduction_ibs_pct" => (e["percredibs"] || e["predaliq"])&.to_s, "reduction_cbs_pct" => e["percredcbs"]&.to_s },
+            effective_from: parse_date(e["dthinivig"] || e["datainicio"]), effective_until: parse_date(e["dthfimvig"] || e["datafim"]) }
+        end
+      end
+
+      def fetch_page
+        uri = URI(PAGE)
+        res = Net::HTTP.get_response(uri, { "User-Agent" => "Mozilla/5.0" })
         raise ArgumentError, "SVRS respondeu #{res.code}" unless res.is_a?(Net::HTTPSuccess)
-        JSON.parse(res.body)
+        body = res.body.force_encoding("UTF-8")
+        start = body.index("var dadosOriginais = ") or raise ArgumentError, "página da SVRS sem dadosOriginais (layout mudou?)"
+        start += "var dadosOriginais = ".length
+        depth = 0
+        finish = start
+        body[start..].each_char.with_index do |ch, i|
+          depth += 1 if ch == "["
+          depth -= 1 if ch == "]"
+          if depth.zero? && ch == "]"
+            finish = start + i + 1
+            break
+          end
+        end
+        JSON.parse(body[start...finish])
       end
 
       def parse_date(v)
         return nil if v.blank?
-        v.to_s.include?("/") ? Date.strptime(v.to_s[0, 10], "%d/%m/%Y") : Date.parse(v.to_s[0, 10])
+        Date.parse(v.to_s[0, 10])
       rescue ArgumentError
         nil
       end

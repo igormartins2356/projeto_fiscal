@@ -11,6 +11,24 @@ module Api
 
         def show = render(json: serialize(@table, full: true))
 
+        # GET /admin/reference_tables/curation_queue — lacunas agregadas dos últimos runs (fila de curadoria por demanda)
+        def curation_queue
+          runs = Audit::AuditRun.where(state: "done").where("created_at > ?", 90.days.ago).order(created_at: :desc).limit(200)
+          agg = Hash.new { |h, k| h[k] = { items: 0, clients: Set.new } }
+          runs.each do |run|
+            %w[st_uf icms_internal_rate_ncm].each do |kind|
+              Array(run.coverage[kind]).each do |e|
+                key = [kind, e["uf"], e["ncm"]]
+                agg[key][:items] += e["items"].to_i
+                agg[key][:clients] << run.client_id
+              end
+            end
+          end
+          rows = agg.map { |(kind, uf, ncm), v| { table: kind == "st_uf" ? "st_uf" : "icms_internal_rate", uf:, ncm:, items: v[:items], clients: v[:clients].size } }
+                    .sort_by { |r| -r[:items] }.first(100)
+          render json: { generated_at: Time.current, runs_considered: runs.size, rows: }
+        end
+
         def create
           t = Catalog::ReferenceTable.create!(table_params)
           render json: serialize(t, full: true), status: :created

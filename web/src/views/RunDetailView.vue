@@ -11,7 +11,7 @@ import Textarea from 'primevue/textarea'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import SeverityTag from '../components/SeverityTag.vue'
-import { auditRuns, findings } from '../api/client'
+import { auditRuns, findings, downloadAuditReport, errorMessage } from '../api/client'
 import { exportCsv, exportXlsx } from '../utils/export'
 
 export const FINDING_STATES = [
@@ -43,6 +43,7 @@ export default {
   },
   data() {
     return {
+      pdfBusy: false,
       rows: [], total: 0, loading: false,
       lazy: { page: 1, per_page: 25, sort_field: 'rule_code', sort_order: 1, filters: { rule_code: null, severity: null, state: null, q: '' } },
       expanded: {},
@@ -107,6 +108,10 @@ export default {
     async exportCsv() { exportCsv(await this.allRows(), EXPORT_COLUMNS, `auditoria-${this.id}.csv`) },
     async exportXlsx() { await exportXlsx(await this.allRows(), EXPORT_COLUMNS, `auditoria-${this.id}.xlsx`) },
     refresh() { this.run.refetch(); this.load() },
+    async downloadPdf() {
+      this.pdfBusy = true
+      try { await downloadAuditReport(this.id) } catch (e) { this.$toast.add({ severity: 'error', summary: 'Falha ao gerar PDF', detail: errorMessage(e), life: 4000 }) } finally { this.pdfBusy = false }
+    },
     stateLabel(v) { return this.states.find(s => s.value === v)?.label ?? v },
   },
 }
@@ -116,6 +121,7 @@ export default {
   <div v-if="run.data">
     <PageHeader :title="`Auditoria #${run.data.id}`" :subtitle="`${run.data.period_start} → ${run.data.period_end} · ${run.data.documents_count} documentos · ${run.data.state}`">
       <template #actions>
+        <Button label="Relatório PDF" icon="pi pi-file-pdf" size="small" :loading="pdfBusy" :disabled="run.data.state !== 'done'" @click="downloadPdf" />
         <Button label="CSV" icon="pi pi-file" severity="secondary" outlined size="small" :disabled="!total" @click="exportCsv" />
         <Button label="XLSX" icon="pi pi-file-excel" severity="secondary" outlined size="small" :disabled="!total" @click="exportXlsx" />
         <Button icon="pi pi-refresh" severity="secondary" outlined size="small" aria-label="Atualizar" @click="refresh" />

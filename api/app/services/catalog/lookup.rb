@@ -13,6 +13,11 @@ module Catalog
 
     attr_reader :versions_used
 
+    # Há versão publicada vigente na data?
+    def table_available?(code)
+      !table_for(code).nil?
+    end
+
     class TableUnavailable < StandardError; end
 
     # Retorna Hash com os dados da linha (+ "_source") ou nil.

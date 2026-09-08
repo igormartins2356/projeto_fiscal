@@ -1,10 +1,4 @@
-def seed_table!(code, name:, key_names:, source_class:, effective_from:, rows:, legal_basis: nil, source_url: nil)
-  table = Catalog::ReferenceTable.find_or_create_by!(code:) { |t| t.name = name; t.key_names = key_names; t.key_arity = key_names.size; t.source_class = source_class; t.source_url = source_url }
-  return if table.versions.exists?
-  version = table.versions.create!(version: 1, effective_from:, state: "published", published_at: Time.current, source_url:, notes: "seed inicial")
-  Catalog::ReferenceRow.insert_all!(rows.map { |key, data| { reference_version_id: version.id, key: Array(key).map(&:to_s), data:, legal_basis: } })
-  puts "catalog: #{code} (#{rows.size} rows)"
-end
+load Rails.root.join("db/seeds/00_helpers.rb") unless respond_to?(:seed_table!, true)
 
 # CFOP — recorte; a tabela completa vem do importador (DATA_SOURCES.md §1.3). Colunas nature/direction são curadoria nossa.
 cfop = {
@@ -62,6 +56,7 @@ seed_table!("icms_interstate_rate", name: "Alíquota interestadual ICMS", key_na
             legal_basis: "Resolução Senado 22/1989; Resolução Senado 13/2012", rows: inter)
 
 # Alíquota interna geral por UF ("*" = geral) — recorte Sudeste; demais UFs entram na curadoria (DATA_SOURCES.md §1.6).
-internal = { "SP" => ["18.00", "0.00"], "MG" => ["18.00", "2.00"], "RJ" => ["20.00", "2.00"], "ES" => ["17.00", "0.00"] }
+# fcp_rate geral: só RJ aplica FCP amplo (2%); MG/ES/SP têm FCP apenas em NCMs específicos (linhas por NCM)
+internal = { "SP" => ["18.00", "0.00"], "MG" => ["18.00", "0.00"], "RJ" => ["20.00", "2.00"], "ES" => ["17.00", "0.00"] }
 seed_table!("icms_internal_rate", name: "Alíquota interna ICMS", key_names: %w[uf ncm], source_class: "C", effective_from: Date.new(2024, 1, 1),
             legal_basis: "Lei estadual do ICMS de cada UF (verificar por linha)", rows: internal.map { |uf, (r, fcp)| [[uf, "*"], { "rate" => r, "fcp_rate" => fcp }] })

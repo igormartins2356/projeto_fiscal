@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { }
+    * { box-sizing: border-box; }
+    body { font-family: "DejaVu Sans", sans-serif; font-size: 9.5px; color: #1e293b; margin: 0; }
+    h1 { font-size: 20px; margin: 0 0 2px; } h2 { font-size: 13px; margin: 22px 0 8px; color: #1e293b; }
+    .muted { color: #64748b; }
+    .brandbar { background: #6366f1; color: #fff; padding: 14px 18px; border-radius: 8px; }
+    .brandbar .firm { font-size: 15px; font-weight: bold; }
+    .brandbar .sub { font-size: 9px; opacity: .85; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 8px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; padding: 4px 6px; }
+    td { border-bottom: 1px solid #eef2f7; padding: 4px 6px; vertical-align: top; }
+    .cards { width: 100%; margin: 12px 0; } .cards td { border: 1px solid #dfe7ef; border-radius: 8px; padding: 10px 12px; width: 25%; }
+    .stat { font-size: 18px; font-weight: bold; } .stat-label { font-size: 8px; text-transform: uppercase; color: #64748b; }
+    .sev { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: bold; }
+    .sev-error { background: #fee2e2; color: #b91c1c; } .sev-warning { background: #ffedd5; color: #c2410c; } .sev-info { background: #dbeafe; color: #1d4ed8; }
+    .rule { border: 1px solid #dfe7ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; }
+    .rule h3 { margin: 0 0 2px; font-size: 11px; }
+    .mono { font-family: "DejaVu Sans Mono", monospace; font-size: 8.5px; }
+    .disclaimer { margin-top: 24px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 7.5px; color: #64748b; }
+  </style>
+</head>
+<body><%= yield %></body>
+</html>

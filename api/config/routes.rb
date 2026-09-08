@@ -26,8 +26,10 @@ Rails.application.routes.draw do
         end
       end
       resources :uploads, only: %i[create show]
+      resources :fiscal_files, only: %i[index show create]
       resources :audit_runs, only: %i[index create show] do
         resources :findings, only: :index
+        get "report.pdf", to: "reports#audit_run", format: false
       end
       resources :findings, only: :update
       resources :rule_overrides, only: %i[index create update destroy]
@@ -46,6 +48,7 @@ Rails.application.routes.draw do
             post :run_all, on: :collection
           end
         end
+        get "reference_tables/curation_queue", to: "reference_tables#curation_queue"
         resources :reference_tables, only: %i[index show create update] do
           post :sync, to: "reference_versions#sync", on: :member
           resources :versions, controller: "reference_versions", only: %i[show create update] do

@@ -26,12 +26,11 @@ RSpec.describe "upload → parse → audit → findings" do
     expect(run.state).to eq("done")
     expect(run.evaluation_errors.reject { |e| e["error"].include?("sem versão publicada") }).to eq([])
     codes = run.findings.pluck(:rule_code)
-    expect(codes).to include("ICMS.CSOSN.SALE_RETURN")
-    expect(codes).not_to include("ICMS.REGIME.SITUATION_FIELD", "DOC.TOTALS.ITEMS_SUM", "CFOP.SCOPE.MATCH", "IBSCBS.GROUP.REQUIRED", "IBSCBS.CBS.RATE_SCHEDULE", "DOC.RETURN.REFERENCE")
-    f = run.findings.find_by(rule_code: "ICMS.CSOSN.SALE_RETURN")
-    expect(f.message).to include("encontrado 102")
-    expect(f.evidence).to include("item.icms.csosn" => "102")
-    expect(f.item_number).to eq(1)
+    expect(codes).to include("DOC.RETURN.ORIGINAL_MISSING")   # devolução da própria venda, original não enviada
+    expect(codes).not_to include("ICMS.CSOSN.SALE_RETURN", "ICMS.REGIME.SITUATION_FIELD", "DOC.TOTALS.ITEMS_SUM", "CFOP.SCOPE.MATCH", "IBSCBS.GROUP.REQUIRED", "IBSCBS.CBS.RATE_SCHEDULE", "DOC.RETURN.REFERENCE", "DOC.RETURN.MIRROR")
+    f = run.findings.find_by(rule_code: "DOC.RETURN.ORIGINAL_MISSING")
+    expect(f.severity).to eq("warning")
+    expect(f.evidence).to include("referenced_access_key" => "35260312345678000190550010000009991000009999")
     expect(run.snapshot["rule_ids"]).to be_present
   end
 
@@ -39,16 +38,16 @@ RSpec.describe "upload → parse → audit → findings" do
     Ingestion::DocumentImporter.new(client:).call(nfe_fixture("sale_return_csosn_102"))
     run1 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
     Audit::Runner.new(run1).call
-    run1.findings.find_by!(rule_code: "ICMS.CSOSN.SALE_RETURN").update!(state: "justified", state_note: "cliente tem entendimento próprio")
+    run1.findings.find_by!(rule_code: "DOC.RETURN.ORIGINAL_MISSING").update!(state: "justified", state_note: "cliente tem entendimento próprio")
 
     run2 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
     Audit::Runner.new(run2).call
-    expect(run2.findings.find_by!(rule_code: "ICMS.CSOSN.SALE_RETURN").state).to eq("justified")
+    expect(run2.findings.find_by!(rule_code: "DOC.RETURN.ORIGINAL_MISSING").state).to eq("justified")
 
-    Rules::RuleOverride.create!(rule_code: "ICMS.CSOSN.SALE_RETURN", source_type: "client", source_id: client.id, override_action: "disable",
+    Rules::RuleOverride.create!(rule_code: "DOC.RETURN.ORIGINAL_MISSING", source_type: "client", source_id: client.id, override_action: "disable",
                                 effective_from: Date.new(2026, 1, 1), justification: "decisão do contador", created_by: Accounts::User.first)
     run3 = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
     Audit::Runner.new(run3).call
-    expect(run3.findings.pluck(:rule_code)).not_to include("ICMS.CSOSN.SALE_RETURN")
+    expect(run3.findings.pluck(:rule_code)).not_to include("DOC.RETURN.ORIGINAL_MISSING")
   end
 end

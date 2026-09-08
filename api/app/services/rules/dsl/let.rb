@@ -5,8 +5,15 @@ module Rules
       def self.apply(lets, ctx)
         Array(lets).reduce(ctx) do |c, spec|
           name = spec["as"] or raise EvaluationError, "let entry without 'as'"
+          # calc/ref sobre campo ausente → variável ausente (a regra decide com present/absent em applies_when)
           value = if spec.key?("lookup") then lookup(spec, c)
-                  elsif spec.key?("calc") then Calc.evaluate(spec["calc"], c)
+                  elsif spec.key?("calc")
+                    begin
+                      Calc.evaluate(spec["calc"], c)
+                    rescue EvaluationError => e
+                      raise unless e.message.start_with?("absent field")
+                      Path::ABSENT
+                    end
                   elsif spec.key?("ref") then Path.fetch(c, spec["ref"])
                   else raise EvaluationError, "let entry must have lookup/calc/ref"
                   end

@@ -9,13 +9,14 @@ module Rules
 
     def run(tc)
       catalog = StubCatalog.new(tc.catalog, date: tc.reference_date)
-      doc = build_document(tc, catalog)
+      docs = build_documents(tc, catalog)
       resolved = Rules::Resolver::ResolvedRule.new(rule: @rule, definition: @rule.definition, source: "platform", override_ids: [])
       engine = Rules::Engine.new([resolved], catalog:, scenario: default_scenario.merge(tc.scenario || {}))
       if %w[item document].include?(@rule.scope)
-        engine.evaluate_document(doc)
+        docs.each { |doc| engine.evaluate_document(doc) }
       else
-        engine.evaluate_period({ "documents" => [doc], "invalidations" => [], "events" => [] })
+        input = tc.input || {}
+        engine.evaluate_period({ "documents" => docs, "invalidations" => Array(input["invalidations"]), "events" => Array(input["events"]) }, stats: Audit::Stats.new(docs), fiscal_file: input["fiscal_file"])
       end
       passed, details = compare(tc.expect, engine)
       tc.update!(last_result: passed ? "passed" : "failed", last_run_at: Time.current)
@@ -24,18 +25,25 @@ module Rules
 
     private
 
-    def build_document(tc, catalog)
+    # input.document (um) ou input.documents (vários, para escopos cross_document/period/scenario)
+    def build_documents(tc, catalog)
+      input = tc.input || {}
+      list = input["documents"].is_a?(Array) ? input["documents"] : [input["document"]]
+      list.each_with_index.map { |d, i| build_document(tc, catalog, d, i) }
+    end
+
+    def build_document(tc, catalog, document = nil, index = 0)
       input = tc.input || {}
       canonical = if input["kind"] == "xml"
         xml = input["xml"].presence || File.read(Rails.root.join(input["fixture"]))
         Ingestion::Nfe::Parser.call(xml)
       else
-        (input["document"] || {}).deep_dup
+        (document || input["document"] || {}).deep_dup
       end
       cnpj = input["monitored_cnpj"] || canonical.dig("issuer", "cnpj") || "00000000000000"
       Ingestion::Nfe::Derivations.call(canonical, monitored_cnpj: cnpj, catalog:) if %w[nfe nfce].include?(canonical["kind"]) && input["derive"] != false
       canonical["items"] ||= []
-      canonical.merge("_id" => 0)
+      canonical.merge("_id" => index)
     end
 
     def compare(expect, engine)
@@ -67,6 +75,7 @@ module Rules
         @real = Catalog::Lookup.new(date:, overrides_enabled: false)
       end
       def lookup(table, key, strict: false) = @stub.key?(table) ? @stub[table][Array(key).map(&:to_s)] : @real.lookup(table, key, strict:)
+      def table_available?(code) = @stub.key?(code) || @real.table_available?(code)
       def versions_used = @real.versions_used
     end
   end

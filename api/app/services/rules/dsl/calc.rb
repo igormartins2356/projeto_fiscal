@@ -4,7 +4,7 @@ module Rules
     # Gramática: or > and > not > comparison > additive > multiplicative > unary > primary
     class Calc
       TOKEN = /\s*(?:(\d+\.\d+|\d+)|([A-Za-z_][A-Za-z0-9_\.\[\]]*)|(==|!=|<=|>=|<|>|\(|\)|,|\+|-|\*|\/|%))/
-      FUNCTIONS = %w[round abs min max sum coalesce year month days_between len].freeze
+      FUNCTIONS = %w[round abs min max sum coalesce year month days_between len opt].freeze
       KEYWORDS = %w[and or not true false null].freeze
 
       def self.evaluate(expr, ctx) = new(expr, ctx).evaluate
@@ -129,7 +129,7 @@ module Rules
         args = []
         unless accept(:op, ")")
           loop do
-            args << (name == "sum" && peek&.first == :id ? next![1] : parse_or)
+            args << (%w[sum opt].include?(name) && peek&.first == :id ? next![1] : parse_or)
             break if accept(:op, ")")
             accept(:op, ",") or raise EvaluationError, "expected , in #{name}()"
           end
@@ -140,6 +140,7 @@ module Rules
         when "min" then args.map { |a| dec(a) }.min
         when "max" then args.map { |a| dec(a) }.max
         when "coalesce" then args.find { |a| !a.nil? }
+        when "opt" then (v = Path.fetch(@ctx, args[0].to_s); Path.absent?(v) ? nil : v)
         when "len" then Array(args[0]).size
         when "year" then Value.to_date(args[0]).year
         when "month" then Value.to_date(args[0]).month

@@ -4,6 +4,7 @@ module Rules
       register "duplicate_document"
       scope "cross_document"
       params_schema match_on: { default: "number_series_cnpj" }, only_authorized: { default: true }
+      vars :access_keys, :issuance
 
       def call
         docs = @ctx.dig("period", "documents") || []

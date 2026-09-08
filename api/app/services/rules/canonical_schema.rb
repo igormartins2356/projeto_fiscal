@@ -33,14 +33,14 @@ module Rules
       product.benefit_code product.ex_tipi product.cfop product.commercial_unit product.commercial_quantity product.commercial_unit_price product.taxable_unit product.taxable_quantity
       product.taxable_unit_price product.gross_amount product.freight product.insurance product.discount product.other_expenses product.included_in_total product.purchase_order
       product.purchase_order_item product.fci product.used_movable_good product.batches product.import_declarations product.export_detail additional_info approx_taxes
-      net_amount cfop_nature cfop_group cfop_scope cfop_known ncm_valid ncm_chapter ncm_generic expected_cest st_applicable_by_catalog is_service has_difal
+      net_amount cfop_nature cfop_group cfop_scope cfop_known cfop_st_role cfop_requires_reference cfop_own_production ncm_valid ncm_chapter ncm_generic expected_cest st_applicable_by_catalog is_service has_difal
       icms.group icms.origin icms.origin_category icms.cst icms.csosn icms.situation_code icms.situation_field icms.base_mode icms.base_reduction_pct icms.base_amount icms.rate icms.amount
       icms.fcp icms.exemption icms.deferral icms.simples_credit icms.expected_base_amount icms.expected_base_reliable icms.expected_amount icms.taxation_kind icms.highlights_icms
-      icms_st.base_mode icms_st.mva_pct icms_st.base_reduction_pct icms_st.base_amount icms_st.rate icms_st.amount icms_st.fcp icms_st.withheld icms_st.exemption icms_st.highlights_st icms_st.has_withheld_st
-      icms_uf_dest.base_amount icms_uf_dest.fcp icms_uf_dest.destination_internal_rate icms_uf_dest.interstate_rate icms_uf_dest.sharing_pct icms_uf_dest.destination_amount icms_uf_dest.sender_amount
-      ipi.cst ipi.taxed ipi.base_amount ipi.rate ipi.amount ipi.quantity ipi.unit_amount ipi.expected_amount ipi.framing_code ii
-      pis.group pis.cst pis.base_amount pis.rate pis.amount pis.base_quantity pis.unit_rate pis.expected_amount pis.taxation_kind pis_st
-      cofins.group cofins.cst cofins.base_amount cofins.rate cofins.amount cofins.base_quantity cofins.unit_rate cofins.expected_amount cofins.taxation_kind cofins_st issqn
+      icms_st.expected_base_amount icms_st.expected_amount icms_st.base_mode icms_st.mva_pct icms_st.base_reduction_pct icms_st.base_amount icms_st.rate icms_st.amount icms_st.fcp icms_st.withheld icms_st.exemption icms_st.highlights_st icms_st.has_withheld_st
+      icms_uf_dest.base_amount icms_uf_dest.fcp icms_uf_dest.destination_internal_rate icms_uf_dest.interstate_rate icms_uf_dest.sharing_pct icms_uf_dest.destination_amount icms_uf_dest.sender_amount icms_uf_dest.expected_destination_amount
+      ipi.cst ipi.cst_direction ipi.taxation_kind ipi.taxed ipi.base_amount ipi.rate ipi.amount ipi.quantity ipi.unit_amount ipi.expected_amount ipi.framing_code ii
+      pis.group pis.cst pis.base_amount pis.rate pis.amount pis.base_quantity pis.unit_rate pis.expected_amount pis.taxation_kind pis.cst_direction pis_st
+      cofins.group cofins.cst cofins.base_amount cofins.rate cofins.amount cofins.base_quantity cofins.unit_rate cofins.expected_amount cofins.taxation_kind cofins.cst_direction cofins_st issqn
       ibs_cbs.present ibs_cbs.cst ibs_cbs.class_code ibs_cbs.base_amount ibs_cbs.ibs_uf ibs_cbs.ibs_city ibs_cbs.ibs ibs_cbs.cbs ibs_cbs.regular_taxation ibs_cbs.presumed_credit
       ibs_cbs.single_phase ibs_cbs.schedule_rates ibs_cbs.ibs.amount ibs_cbs.ibs.expected_amount ibs_cbs.cbs.rate ibs_cbs.cbs.amount ibs_cbs.cbs.effective_rate ibs_cbs.cbs.expected_amount
       ibs_cbs.schedule_rates.cbs ibs_cbs.schedule_rates.ibs_uf ibs_cbs.schedule_rates.ibs_city is.cst is.class_code is.base_amount is.rate is.amount

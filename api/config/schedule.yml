@@ -1,0 +1,15 @@
+# Agenda do sidekiq-cron (DATA_SOURCES.md §3): sincronização automática das tabelas classe A e lembretes de revisão.
+catalog_sync_ncm:
+  cron: "0 5 * * 1"          # semanal (segunda 05:00)
+  class: "Catalog::SyncJob"
+  args: ["ncm"]
+  queue: catalog
+catalog_sync_ibs_cbs_class:
+  cron: "30 5 * * *"         # diária
+  class: "Catalog::SyncJob"
+  args: ["ibs_cbs_class"]
+  queue: catalog
+catalog_review_reminder:
+  cron: "0 6 * * *"          # diária: tabelas com next_review_on vencido
+  class: "Catalog::ReviewReminderJob"
+  queue: catalog

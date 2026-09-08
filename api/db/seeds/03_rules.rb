@@ -1,21 +1,12 @@
-def seed_rule!(code, **attrs)
-  body = attrs.extract!(:let, :applies_when, :assert, :primitive, :message, :explanation, :legal_references, :params, :group_by, :suggested_fix).compact.transform_keys(&:to_s)
-  Rules::Rule.find_or_create_by!(code:, version: attrs.fetch(:version, 1)) do |r|
-    r.assign_attributes(attrs.merge(body:, state: "published", published_at: Time.current))
-  end
-end
+load Rails.root.join("db/seeds/00_helpers.rb") unless respond_to?(:seed_rule!, true)
 
 issuer = { "field" => "doc.role", "op" => "eq", "value" => "issuer" }
 simples = { "field" => "scenario.tax_regime", "op" => "eq", "value" => "simples_nacional" }
 normal_regime = { "field" => "scenario.tax_regime", "op" => "in", "value" => %w[lucro_presumido lucro_real] }
 
-seed_rule!("ICMS.CSOSN.SALE_RETURN", title: "CSOSN em devolução de venda (Simples)", scope: "item", severity: "error", effective_from: Date.new(2010, 1, 1), tags: %w[icms simples_nacional sale_return],
-  applies_when: { "all" => [issuer, simples, { "field" => "doc.operation.nature", "op" => "eq", "value" => "sale_return" }, { "field" => "item.icms.csosn", "op" => "present" }] },
-  assert: { "field" => "item.icms.csosn", "op" => "eq", "value" => "900" },
-  message: "Devolução de venda no Simples Nacional deve usar CSOSN 900; encontrado {{item.icms.csosn}} (CFOP {{item.product.cfop}}).",
-  explanation: "Na devolução de venda, o Simples Nacional utiliza o CSOSN 900 (Outros), informando base e valor do ICMS conforme a nota original quando houver destaque.",
-  legal_references: [{ "label" => "Ajuste SINIEF 07/05, Tabela B (CSOSN)" }],
-  group_by: ["item.icms.csosn"])
+# ICMS.CSOSN.SALE_RETURN foi removida (30/08/2026): devolução de venda emitida pelo próprio optante espelha a nota original (CSOSN da venda);
+# o CSOSN 900 é o caso da devolução de COMPRA (destaque do ICMS do fornecedor). Substituída por DOC.RETURN.MIRROR.
+retire_rule!("ICMS.CSOSN.SALE_RETURN", "devolução de venda espelha a original; ver DOC.RETURN.MIRROR")
 
 seed_rule!("ICMS.REGIME.SITUATION_FIELD", title: "CST × CSOSN coerente com o regime do cenário", scope: "item", severity: "error", effective_from: Date.new(2010, 1, 1), tags: %w[icms regime],
   applies_when: { "all" => [issuer, { "field" => "item.is_service", "op" => "eq", "value" => false }, { "field" => "item.icms.situation_field", "op" => "neq", "value" => "absent" }] },
@@ -62,7 +53,9 @@ seed_rule!("ICMS.AMOUNT.CALC", title: "vICMS ≠ vBC × alíquota", scope: "item
 
 seed_rule!("ICMS.RATE.INTERSTATE", title: "Alíquota interestadual de ICMS", scope: "item", severity: "error", effective_from: Date.new(2013, 1, 1), tags: %w[icms interstate],
   let: [{ "lookup" => "icms_interstate_rate", "key" => [{ "ref" => "doc.operation.origin_uf" }, { "ref" => "doc.operation.destination_uf" }, { "ref" => "item.icms.origin_category" }], "as" => "expected" }],
+  explanation: "Res. Senado 22/1989 (7%/12%) e 13/2012 (4% para origem 1, 2, 3 e 8). Antes de 2016 (EC 87/2015) a venda interestadual a não contribuinte usava a alíquota interna — por isso a regra só alcança não contribuintes a partir de 01/01/2016.",
   applies_when: { "all" => [issuer, normal_regime, { "field" => "doc.operation.scope", "op" => "eq", "value" => "interstate" },
+                            { "any" => [{ "field" => "doc.recipient.ie_indicator", "op" => "eq", "value" => "taxpayer" }, { "field" => "doc.reference_date", "op" => "gte", "value" => "2016-01-01" }] },
                             { "field" => "item.icms.taxation_kind", "op" => "in", "value" => %w[taxed taxed_with_st reduced_base reduced_base_with_st] },
                             { "field" => "expected", "op" => "present" }, { "field" => "item.icms.rate", "op" => "present" }] },
   assert: { "field" => "item.icms.rate", "op" => "approx", "value" => { "ref" => "expected.rate" }, "tolerance" => "0.001" },

@@ -24,7 +24,7 @@ const BENEFIT_KINDS = [
 const PIS_REGIMES = [{ value: 'simples', label: 'Simples Nacional' }, { value: 'cumulative', label: 'Cumulativo (0,65% / 3%)' }, { value: 'non_cumulative', label: 'Não cumulativo (1,65% / 7,6%)' }]
 const IBS_REGIMES = [{ value: 'regular', label: 'Regular' }, { value: 'simples_nacional_opt_in', label: 'Simples com opção IBS/CBS por fora' }]
 const EMPTY = { tax_regime: undefined, uf: 'SP', city_code: '', icms_taxpayer: true, ipi_taxpayer: false, iss_taxpayer: false, activity: [], cnae: { primary: '', secondary: [] },
-  sells_to_final_consumer: false, uses_nfce: false, exports: false, imports: false, st: { source: 'catalog', overrides: [] }, benefits: [],
+  sells_to_final_consumer: false, uses_nfce: false, exports: false, imports: false, st: { source: 'catalog', applies: false, overrides: [] }, benefits: [],
   pis_cofins: { regime: undefined }, ibs_cbs: { regime: 'regular' }, effective_from: new Date().toISOString().slice(0, 10), effective_until: null }
 
 export default {
@@ -185,6 +185,7 @@ export default {
 
         <section class="card space-y-3">
           <div class="flex items-center gap-3"><h2 class="card-title !mb-0">Substituição tributária</h2>
+            <Field name="st.applies" type="checkbox" :value="true" :unchecked-value="false" v-slot="{ value, handleChange }"><label class="inline-flex items-center gap-2 text-sm"><Checkbox :modelValue="value" binary @update:modelValue="handleChange" /> Opera com ST (retém ou revende com ST retida)<Tag v-if="editing.fieldOrigins.st === 'inferred'" severity="info" value="inferido" /></label></Field>
             <Field name="st.source" v-slot="{ value, handleChange }"><Select :modelValue="value" :options="[{ value: 'catalog', label: 'Pela tabela da UF (catálogo)' }, { value: 'manual', label: 'Somente exceções manuais' }]" optionValue="value" optionLabel="label" class="text-xs" @update:modelValue="handleChange" /></Field>
           </div>
           <FieldArray name="st.overrides" v-slot="{ fields, push, remove }">

@@ -27,7 +27,7 @@ module Rules
         raise EvaluationError, "unknown op #{op}" unless OPS.include?(op)
 
         actual = Path.fetch(ctx, field)
-        absent = Path.absent?(actual)
+        absent = Path.absent?(actual) || actual.nil?
         return absent if op == "absent"
         return !absent if op == "present"
 
@@ -45,11 +45,11 @@ module Rules
         when "neq" then !Value.equal?(actual, value)
         when "in" then Array(value).any? { |v| Value.equal?(actual, v) }
         when "not_in" then Array(value).none? { |v| Value.equal?(actual, v) }
-        when "gt" then Value.compare(actual, value) > 0
-        when "gte" then Value.compare(actual, value) >= 0
-        when "lt" then Value.compare(actual, value) < 0
-        when "lte" then Value.compare(actual, value) <= 0
-        when "between" then Value.compare(actual, value[0]) >= 0 && Value.compare(actual, value[1]) <= 0
+        when "gt" then cmp(actual, value) > 0
+        when "gte" then cmp(actual, value) >= 0
+        when "lt" then cmp(actual, value) < 0
+        when "lte" then cmp(actual, value) <= 0
+        when "between" then cmp(actual, value[0]) >= 0 && cmp(actual, value[1]) <= 0
         when "approx"
           a, b = Value.to_decimal(actual), Value.to_decimal(value)
           if cond.key?("tolerance_pct")
@@ -66,6 +66,12 @@ module Rules
         when "empty" then actual.respond_to?(:empty?) ? actual.empty? : actual.nil?
         when "not_empty" then actual.respond_to?(:empty?) ? !actual.empty? : !actual.nil?
         end
+      end
+
+      def self.cmp(a, b)
+        c = Value.compare(a, b)
+        raise EvaluationError, "incomparable values #{a.inspect} and #{b.inspect}" if c.nil?
+        c
       end
 
       def self.quantifier(cond, ctx)

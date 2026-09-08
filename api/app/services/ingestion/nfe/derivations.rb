@@ -42,7 +42,9 @@ module Ingestion
         d["operation"]["mixed_cfop"] = cfops.size > 1
         d["operation"]["nature"] = nature(d)
         totals(d)
-        d["status"] = { "state" => status_state(d.dig("protocol", "status_code")) }
+        # preserva cancelamento já projetado por evento (rederivação não pode "descancelar")
+        prev = d["status"] || {}
+        d["status"] = prev.merge("state" => (prev["state"] == "cancelled" ? "cancelled" : status_state(d.dig("protocol", "status_code"))))
         d["references"].each { |ref| ref["resolved"] = false }
         d
       end
@@ -60,19 +62,31 @@ module Ingestion
         cfop_row = @catalog.lookup("cfop", [cfop])
         it["cfop_nature"] = cfop_row&.dig("nature") || "unknown"
         it["cfop_known"] = !cfop_row.nil?
+        it["cfop_st_role"] = cfop_row&.dig("st_role") || "unknown"
+        it["cfop_requires_reference"] = cfop_row&.dig("requires_reference") || false
+        it["cfop_own_production"] = cfop_row&.dig("own_production") || false
         ncm = p["ncm"].to_s
         it["ncm_chapter"] = ncm[0, 2]
         it["ncm_generic"] = ncm == "00000000" || ncm == "00"
-        it["ncm_valid"] = !@catalog.lookup("ncm", [ncm]).nil? if @catalog.lookup("ncm", ["__present__"]) || ncm_table?
+        it["ncm_valid"] = !@catalog.lookup("ncm", [ncm]).nil? if @catalog.respond_to?(:table_available?) && @catalog.table_available?("ncm")
         it["is_service"] = it.key?("issqn")
+        if (cest_row = @catalog.lookup("cest", [ncm]))
+          it["expected_cest"] = Array(cest_row["cest"])
+        end
+        dest_uf = d.dig("operation", "destination_uf") || d.dig("issuer", "uf")
+        st_row = @catalog.lookup("st_uf", [dest_uf.to_s, ncm]) || @catalog.lookup("st_uf", [dest_uf.to_s, ncm[0, 4]]) || (p["cest"] && @catalog.lookup("st_uf", [dest_uf.to_s, p["cest"]]))
+        it["st_applicable_by_catalog"] = st_row["applies"] if st_row && !st_row["applies"].nil?
         if (icms = it["icms"])
           icms["situation_code"] = icms["cst"] || icms["csosn"]
           icms["situation_field"] = icms["cst"] ? "cst" : icms["csosn"] ? "csosn" : "absent"
-          icms["origin_category"] = %w[1 2 6 7].include?(icms["origin"]) ? "imported" : "domestic"
+          # Res. Senado 13/2012: 4% para origem 1, 2 (estrangeira), 3 (>40% conteúdo importado) e 8 (>70%); 4 (PPB), 5 (≤40%), 6 e 7 (sem similar nacional) seguem 7%/12%
+          icms["origin_category"] = %w[1 2 3 8].include?(icms["origin"]) ? "imported" : "domestic"
           icms["highlights_icms"] = dec.(icms["amount"]) > 0
           if icms["base_mode"]
             red = dec.(icms["base_reduction_pct"])
-            icms["expected_base_amount"] = fmt((net * (1 - red / 100)).round(2, BigDecimal::ROUND_HALF_UP))
+            # LC 87/96 art. 13 §2: o IPI integra a base do ICMS quando a operação é a consumidor final / não contribuinte
+            ipi_in_base = (d.dig("operation", "final_consumer") == true || d.dig("recipient", "ie_indicator") == "non_taxpayer") ? dec.(it.dig("ipi", "amount")) : BigDecimal("0")
+            icms["expected_base_amount"] = fmt(((net + ipi_in_base) * (1 - red / 100)).round(2, BigDecimal::ROUND_HALF_UP))
             icms["expected_base_reliable"] = icms["base_mode"] == "3"
           end
           icms["expected_amount"] = fmt((dec.(icms["base_amount"]) * dec.(icms["rate"]) / 100).round(2, BigDecimal::ROUND_HALF_UP)) if icms["base_amount"] && icms["rate"]
@@ -82,15 +96,32 @@ module Ingestion
         if (st = it["icms_st"])
           st["highlights_st"] = dec.(st["amount"]) > 0
           st["has_withheld_st"] = st.dig("withheld", "amount").present?
+          if st["mva_pct"] && st["base_mode"] == "4"
+            ipi_amt = dec.(it.dig("ipi", "amount"))
+            red = dec.(st["base_reduction_pct"])
+            st["expected_base_amount"] = fmt(((net + ipi_amt) * (1 + dec.(st["mva_pct"]) / 100) * (1 - red / 100)).round(2, BigDecimal::ROUND_HALF_UP))
+          end
+          if st["base_amount"] && st["rate"]
+            own = dec.(it.dig("icms", "amount"))
+            st["expected_amount"] = fmt((dec.(st["base_amount"]) * dec.(st["rate"]) / 100 - own).round(2, BigDecimal::ROUND_HALF_UP))
+          end
+        end
+        if (ud = it["icms_uf_dest"]) && ud["base_amount"] && ud["destination_internal_rate"] && ud["interstate_rate"]
+          ud["expected_destination_amount"] = fmt((dec.(ud["base_amount"]) * (dec.(ud["destination_internal_rate"]) - dec.(ud["interstate_rate"])) / 100).round(2, BigDecimal::ROUND_HALF_UP))
         end
         it["has_difal"] = it.key?("icms_uf_dest")
         %w[pis cofins].each do |k|
           next unless (x = it[k])
           x["expected_amount"] = fmt((dec.(x["base_amount"]) * dec.(x["rate"]) / 100).round(2, BigDecimal::ROUND_HALF_UP)) if x["base_amount"] && x["rate"]
-          x["taxation_kind"] = @catalog.lookup("cst_pis_cofins", [x["cst"].to_s])&.dig("taxation_kind") || "unknown"
+          row = @catalog.lookup("cst_pis_cofins", [x["cst"].to_s])
+          x["taxation_kind"] = row&.dig("taxation_kind") || "unknown"
+          x["cst_direction"] = row&.dig("direction") || "unknown"
         end
-        if (ipi = it["ipi"]) && ipi["base_amount"] && ipi["rate"]
-          ipi["expected_amount"] = fmt((dec.(ipi["base_amount"]) * dec.(ipi["rate"]) / 100).round(2, BigDecimal::ROUND_HALF_UP))
+        if (ipi = it["ipi"])
+          ipi["expected_amount"] = fmt((dec.(ipi["base_amount"]) * dec.(ipi["rate"]) / 100).round(2, BigDecimal::ROUND_HALF_UP)) if ipi["base_amount"] && ipi["rate"]
+          row = @catalog.lookup("cst_ipi", [ipi["cst"].to_s])
+          ipi["cst_direction"] = row&.dig("direction") || "unknown"
+          ipi["taxation_kind"] = row&.dig("taxation_kind") || "unknown"
         end
         it["ibs_cbs"] ||= { "present" => false }
         if it["ibs_cbs"]["present"]
@@ -106,8 +137,6 @@ module Ingestion
           end
         end
       end
-
-      def ncm_table? = (@ncm_table = Catalog::ReferenceTable.exists?(code: "ncm")) if @ncm_table.nil?
 
       def nature(d)
         purpose = d.dig("issuance", "purpose")

@@ -26,7 +26,7 @@ RSpec.describe "cross-document primitives & catalog importers" do
     expect(run.reload.evaluation_errors.reject { |e| e["error"].include?("sem versão publicada") }).to eq([])
     gap = run.findings.find_by(rule_code: "DOC.NUMBERING.GAP")
     expect(gap.evidence).to include("missing_from" => 102, "missing_to" => 104, "missing_count" => 3)
-    exceed = run.findings.find_by(rule_code: "DOC.RETURN.ORIGINAL")
+    exceed = run.findings.find_by(rule_code: "DOC.RETURN.EXCEEDS_ORIGINAL")
     expect(exceed.evidence).to include("product_code" => "A1", "returned_quantity" => "3.0", "original_quantity" => "2.0")
     expect(run.findings.where(rule_code: "DOC.DUPLICATE.NUMBER_SERIES")).to be_empty
   end
@@ -44,6 +44,6 @@ RSpec.describe "cross-document primitives & catalog importers" do
     r2 = Catalog::Importers::IbsCbsClass.new.call(json: [{ "cClassTrib" => "000001", "CST" => "000", "Descricao" => "Tributação integral", "pRedAliq" => "0" }, { "cClassTrib" => "200003", "CST" => "200", "Descricao" => "Redução 60%", "pRedAliq" => "60" }])
     expect(r2[:imported]).to eq(2)
     r2[:version].update!(state: "published")
-    expect(Catalog::Lookup.new(date: Date.current).lookup("ibs_cbs_class", ["200003"])).to include("cst" => "200", "reduction_pct" => "60")
+    expect(Catalog::Lookup.new(date: Date.current).lookup("ibs_cbs_class", ["200003"])).to include("cst" => "200", "reduction_ibs_pct" => "60")
   end
 end

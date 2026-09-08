@@ -95,7 +95,8 @@ CREATE TABLE public.audit_runs (
     started_at timestamp(6) without time zone,
     finished_at timestamp(6) without time zone,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    coverage jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
@@ -359,7 +360,10 @@ CREATE TABLE public.fiscal_files (
     state character varying DEFAULT 'pending'::character varying NOT NULL,
     records_count integer DEFAULT 0 NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    errors_log jsonb DEFAULT '[]'::jsonb NOT NULL,
+    summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    uploaded_by_id bigint
 );
 
 
@@ -1464,6 +1468,13 @@ CREATE INDEX index_fiscal_files_on_upload_batch_id ON public.fiscal_files USING 
 
 
 --
+-- Name: index_fiscal_files_on_uploaded_by_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_fiscal_files_on_uploaded_by_id ON public.fiscal_files USING btree (uploaded_by_id);
+
+
+--
 -- Name: index_fiscal_records_on_document_access_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1802,6 +1813,14 @@ ALTER TABLE ONLY public.rule_test_cases
 
 
 --
+-- Name: fiscal_files fk_rails_6e3dbeb3da; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fiscal_files
+    ADD CONSTRAINT fk_rails_6e3dbeb3da FOREIGN KEY (uploaded_by_id) REFERENCES public.users(id);
+
+
+--
 -- Name: upload_batches fk_rails_7001540c7a; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1976,6 +1995,8 @@ ALTER TABLE ONLY public.findings
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260831000002'),
+('20260831000001'),
 ('20260830000002'),
 ('20260830000001'),
 ('20260829000001');

@@ -5,6 +5,7 @@ module Rules
       register "scenario_field_disagreement"
       scope "scenario"
       params_schema field: { default: nil }, evidence: { default: nil }, threshold: { default: "0.2" }, when_field_is: { default: false }
+      vars :share_pct, :matching_items, :total_items
 
       def call
         docs = @ctx.dig("period", "documents") || []

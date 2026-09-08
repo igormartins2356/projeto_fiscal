@@ -5,6 +5,7 @@ module Rules
       register "numbering_gap"
       scope "cross_document"
       params_schema max_gap_ignored: { default: 0 }, consider_invalidations: { default: true }
+      vars :model, :series, :missing_from, :missing_to, :missing_count
 
       def call
         docs = (@ctx.dig("period", "documents") || []).select { |d| d["role"] == "issuer" && d.dig("issuance", "number") }

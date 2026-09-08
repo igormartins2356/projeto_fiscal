@@ -145,7 +145,22 @@
 
 ---
 
+## 2b. Estado das tabelas (31/08/2026)
+
+| Tabela | Situação | Cobertura / observações |
+|---|---|---|
+| `ncm` | ✅ importada (Siscomex JSON, 10.515 códigos, vigência por linha) | sync automático semanal (`Catalog::SyncJob`) |
+| `tipi` | ✅ importada (xlsx oficial RFB, Decreto 11.158/22 até ADE 1/2026, 10.521 linhas + flag `has_ex`) | reimportar a cada ADE (classe B) |
+| `cest` | ✅ importada (Convênio 142/18, anexos II–XXVI parseados, 1.591 CEST expandidos em 8.320 NCMs) | revisar a cada convênio alterador |
+| `ibs_cbs_class` | ✅ importada (dataset `dadosOriginais` da página pública da SVRS — 18 CSTs, 164 cClassTrib com vigência e reduções; **sem certificado**) | sync automático diário |
+| `pis_cofins_special` | ✅ gerada (Leis 10.147/00, 13.097/15, 9.718/98+10.560/02 expandidas por NCM = 389 códigos) | **pendente: autopeças (Lei 10.485/02)** |
+| `st_uf` | ⚠️ parcial (SP × medicamentos, Portaria CAT 68/2019, 305 NCMs) | **cresce por demanda**: `Audit::Coverage` grava em cada run os pares UF×NCM consultados sem linha; `GET /admin/reference_tables/curation_queue` agrega (90 dias) e prioriza — cada linha nova exige base legal. Fornecedor de conteúdo segue como opção de escala |
+| `icms_internal_rate` | ✅ geral: **27 UFs** (v2, vigência 2026-01-01, fontes cruzadas em 31/08/2026; FCP geral só RJ — AL/SE/PB têm fundo por produto, anotado) | ⚠️ por NCM: crescer pela fila de curadoria |
+| demais (`cfop`, `cst_*`, `csosn`, `icms_interstate_rate`, `ibs_cbs_schedule`) | ✅ completas | classe D, mudanças raras |
+
 ## 3. Processo de atualização
+
+**Implementado (31/08/2026):** `sidekiq-cron` (`config/schedule.yml`) roda `Catalog::SyncJob` (ncm semanal, ibs_cbs_class diário — cria versão **draft** apenas quando o conteúdo difere da vigente; publicar continua decisão humana com diff no painel) e `Catalog::ReviewReminderJob` (diário — registra em `audit_logs` as tabelas com `next_review_on` vencido ou sem versão; o painel de tabelas destaca em vermelho). `next_review_on` é definido por classe: A=90d (sanidade do sync), B=30d, C=90d, D=365d. Regras: alteração é sempre **nova versão** via painel (`draft → testing → shadow → published`), com casos de teste obrigatórios; `bin/rails rules:validate && bin/rails rules:test` no CI.
 
 ### 3.1 Rotina
 

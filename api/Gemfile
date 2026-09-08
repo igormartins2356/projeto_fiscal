@@ -9,6 +9,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 
 # Jobs
 gem "sidekiq", "~> 8.0"
+gem "sidekiq-cron"
 
 # API
 gem "rack-cors"
@@ -25,6 +26,10 @@ gem "csv"
 
 # Storage (S3-compatible in production)
 gem "aws-sdk-s3", require: false
+
+# Relatórios PDF
+gem "wicked_pdf"
+gem "wkhtmltopdf-binary"
 
 group :development, :test do
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"

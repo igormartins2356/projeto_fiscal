@@ -277,12 +277,14 @@ Cada regra tem ≥ 1 caso que **dispara** e ≥ 1 que **não dispara** para ser 
   "reference_date": "2026-03-14",
   "scenario": {"tax_regime": "simples_nacional", "uf": "SP"},         // parcial; resto vem de um default
   "input": {"kind": "canonical", "document": { ...recorte canônico... }},   // ou {"kind": "xml", "fixture": "fixtures/nfe/sale_return_csosn_102.xml"}
+  // escopos cross_document/period/scenario: "documents": [ {...}, {...} ], "events": [ {access_key, event: {kind, occurred_at}} ], "invalidations": [ {model, series, first_number, last_number} ]
   "catalog": {"icms_interstate_rate": [{"key": ["SP","BA","domestic"], "data": {"rate": "7.00"}}]},   // opcional, sobrepõe o catálogo real no teste
   "expect": {"findings": [{"item_number": 1, "severity": "error", "evidence": {"item.icms.csosn": "102"}}]}   // ou {"findings": []}
 }
 ```
 
-- Rodam na publicação (bloqueiam), no CI (todas as regras publicadas contra o motor atual) e sob demanda no painel.
+- Rodam na publicação (bloqueiam), no CI (`bin/rails rules:test` roda todos os casos de todas as regras; `bin/rails rules:validate` faz a validação estática) e sob demanda no painel.
+- Documentos canônicos de teste são construídos por `lib/rule_case_builder.rb` (`RuleCaseBuilder.doc(item:, doc:, normal:)`); a seed `db/seeds/06_rule_test_cases.rb` cobre todas as regras com ≥1 caso que dispara e ≥1 que não dispara.
 - Fixtures XML reais são anonimizadas (CNPJ/nomes/endereços substituídos) por script antes de entrar no repositório.
 
 ---

@@ -4,6 +4,7 @@ module Rules
       register "items_sum_matches_totals"
       scope "document"
       params_schema fields: { default: %w[products icms_base icms icms_st ipi pis cofins] }, tolerance: { default: "0.01" }
+      vars :field, :total, :items_sum, :difference
 
       def call
         doc = @ctx["doc"]

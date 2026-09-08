@@ -24,6 +24,7 @@ module Ingestion
       xml_ref = @storage.store(client: @client, hash:, xml:, filename:)
       doc = persist(canonical, xml_ref)
       apply_event(doc) if doc.kind == "event"
+      apply_pending_events(doc) if %w[nfe nfce].include?(doc.kind)
       Ingestion::ReferenceResolver.new(@client).call(doc)
       Result.new(document: doc, status: :created)
     end
@@ -54,6 +55,11 @@ module Ingestion
         Ingestion::DocumentItem.insert_all!(rows) if rows.any?
         doc
       end
+    end
+
+    # Autorização importada depois do cancelamento: aplica eventos que já esperavam por ela
+    def apply_pending_events(doc)
+      Ingestion::Document.where(client_id: @client.id, kind: "event", target_access_key: doc.access_key).find_each { |ev| apply_event(ev) }
     end
 
     # Evento de cancelamento projeta status na nota alvo (CANONICO.md §8.6)

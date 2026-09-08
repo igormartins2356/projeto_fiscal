@@ -5,7 +5,7 @@ RSpec.describe "Admin: rules & reference tables", type: :request do
   let(:h) { post "/api/v1/auth/login", params: { email: "admin@fiscal.local", password: "password123" }; { "Authorization" => "Bearer #{response.parsed_body['access_token']}" } }
 
   it "validates, tests and promotes a new rule version through the lifecycle" do
-    post "/api/v1/admin/rules", params: { code: "ICMS.CSOSN.SALE_RETURN" }, headers: h, as: :json
+    post "/api/v1/admin/rules", params: { code: "ICMS.REGIME.SITUATION_FIELD" }, headers: h, as: :json
     expect(response).to have_http_status(:created), response.body
     rule = response.parsed_body
     expect(rule["version"]).to eq(2)
@@ -27,11 +27,11 @@ RSpec.describe "Admin: rules & reference tables", type: :request do
     post "/api/v1/admin/rules/#{rule['id']}/transition", params: { to: "shadow" }, headers: h, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     post "/api/v1/admin/rules/#{rule['id']}/test_cases", headers: h, as: :json, params: {
-      name: "dispara", reference_date: "2026-03-14", input: { kind: "xml", fixture: "spec/fixtures/nfe/sale_return_csosn_102.xml" },
-      expect: { findings: [{ item_number: 1, severity: "error", evidence: { "item.icms.csosn" => "102" } }] } }
+      name: "dispara", reference_date: "2026-03-14", scenario: { tax_regime: "lucro_presumido" }, input: { kind: "xml", fixture: "spec/fixtures/nfe/sale_return_csosn_102.xml" },
+      expect: { findings: [{ item_number: 1, severity: "error", evidence: { "item.icms.situation_field" => "csosn" } }] } }
     expect(response).to have_http_status(:created), response.body
     post "/api/v1/admin/rules/#{rule['id']}/test_cases", headers: h, as: :json, params: {
-      name: "não dispara (regime normal)", reference_date: "2026-03-14", scenario: { tax_regime: "lucro_presumido" },
+      name: "não dispara (Simples com CSOSN)", reference_date: "2026-03-14", scenario: { tax_regime: "simples_nacional" },
       input: { kind: "xml", fixture: "spec/fixtures/nfe/sale_return_csosn_102.xml" }, expect: { findings: [] } }
     post "/api/v1/admin/rules/#{rule['id']}/test_cases/run_all", headers: h
     expect(response.parsed_body.map { |r| r["passed"] }).to eq([true, true])
@@ -42,7 +42,7 @@ RSpec.describe "Admin: rules & reference tables", type: :request do
 
     # a versão 2 passa a ser a escolhida pelo resolver
     client = Accounts::Client.find_by!(cnpj: "12345678000190")
-    chosen = Rules::Resolver.new(client:, date: Date.new(2026, 3, 14)).call.find { |r| r.rule.code == "ICMS.CSOSN.SALE_RETURN" }
+    chosen = Rules::Resolver.new(client:, date: Date.new(2026, 3, 14)).call.find { |r| r.rule.code == "ICMS.REGIME.SITUATION_FIELD" }
     expect(chosen.rule.version).to eq(2)
   end
 
@@ -67,10 +67,10 @@ RSpec.describe "Admin: rules & reference tables", type: :request do
 
   it "lets a firm admin override a rule and a table row for a client, with precedence" do
     client = Accounts::Client.find_by!(cnpj: "12345678000190")
-    post "/api/v1/rule_overrides", headers: h, as: :json, params: { rule_code: "ICMS.CSOSN.SALE_RETURN", source_type: "client", source_id: client.id, override_action: "adjust",
+    post "/api/v1/rule_overrides", headers: h, as: :json, params: { rule_code: "ICMS.REGIME.SITUATION_FIELD", source_type: "client", source_id: client.id, override_action: "adjust",
       patch: { severity: "warning" }, effective_from: "2026-01-01", justification: "cliente possui consulta formal" }
     expect(response).to have_http_status(:created), response.body
-    resolved = Rules::Resolver.new(client:, date: Date.new(2026, 3, 1)).call.find { |r| r.rule.code == "ICMS.CSOSN.SALE_RETURN" }
+    resolved = Rules::Resolver.new(client:, date: Date.new(2026, 3, 1)).call.find { |r| r.rule.code == "ICMS.REGIME.SITUATION_FIELD" }
     expect(resolved.definition["severity"]).to eq("warning")
     expect(resolved.source).to eq("client")
 

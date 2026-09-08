@@ -54,7 +54,7 @@ export const taxScenarioSchema = z.object({
   uses_nfce: z.boolean().default(false),
   exports: z.boolean().default(false),
   imports: z.boolean().default(false),
-  st: z.object({ source: z.enum(['catalog', 'manual']).default('catalog'), overrides: z.array(stOverrideSchema).default([]) }).default({ source: 'catalog', overrides: [] }),
+  st: z.object({ source: z.enum(['catalog', 'manual']).default('catalog'), applies: z.boolean().default(false), overrides: z.array(stOverrideSchema).default([]) }).default({ source: 'catalog', applies: false, overrides: [] }),
   benefits: z.array(benefitSchema).default([]),
   pis_cofins: z.object({ regime: z.enum(['simples', 'cumulative', 'non_cumulative'], required('Regime de PIS/COFINS')) }),
   ibs_cbs: z.object({ regime: z.enum(['regular', 'simples_nacional_opt_in']).default('regular') }).default({ regime: 'regular' }),

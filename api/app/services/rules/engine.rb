@@ -2,7 +2,7 @@ module Rules
   # Motor genérico: recebe regras resolvidas + contexto → findings (Hash) e evaluation_errors.
   # Não conhece valor fiscal algum.
   class Engine
-    Finding = Struct.new(:rule, :definition, :source, :document_id, :item_number, :message, :evidence, :vars, :group_key, keyword_init: true)
+    Finding = Struct.new(:rule, :definition, :source, :document_id, :item_number, :fiscal_record_id, :message, :evidence, :vars, :group_key, keyword_init: true)
 
     attr_reader :findings, :errors
 
@@ -46,7 +46,8 @@ module Rules
         prim.call.each do |hit|
           vctx = ctx.merge(hit[:vars] || {})
           emit(r, vctx, document_id: hit.dig(:target, :document_id) || document_id,
-                        item_number: hit.dig(:target, :item_number) || item_number, extra_evidence: hit[:evidence] || {})
+                        item_number: hit.dig(:target, :item_number) || item_number,
+                        fiscal_record_id: hit.dig(:target, :fiscal_record_id), extra_evidence: hit[:evidence] || {})
         end
       else
         return if Dsl::Condition.evaluate(d["assert"], ctx)
@@ -60,7 +61,7 @@ module Rules
       end
     end
 
-    def emit(r, ctx, document_id:, item_number:, extra_evidence: {})
+    def emit(r, ctx, document_id:, item_number:, fiscal_record_id: nil, extra_evidence: {})
       d = r.definition
       paths = referenced_paths(d)
       evidence = paths.each_with_object({}) do |p, h|
@@ -68,7 +69,7 @@ module Rules
         h[p] = Dsl::Path.absent?(v) ? nil : Dsl::Template.format(v)
       end.merge(extra_evidence)
       group_key = Array(d["group_by"]).map { |p| Dsl::Template.format(Dsl::Path.fetch(ctx, p)) }.join("|").presence
-      @findings << Finding.new(rule: r.rule, definition: d, source: r.source, document_id:, item_number:,
+      @findings << Finding.new(rule: r.rule, definition: d, source: r.source, document_id:, item_number:, fiscal_record_id:,
                                message: Dsl::Template.render(d["message"], ctx), evidence:, group_key:)
     end
 

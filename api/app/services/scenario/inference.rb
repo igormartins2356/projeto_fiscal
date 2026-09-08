@@ -50,7 +50,7 @@ module Scenario
       f["exports"] = { "value" => cfops.any? { |c, _| c.start_with?("7") }, "confidence" => 0.95, "evidence" => "CFOP 7xxx #{cfops.any? { |c, _| c.start_with?('7') } ? 'presente' : 'ausente'}" }
 
       st_share = share_of(items) { |i| i.dig("icms_st", "highlights_st") || %w[60 500].include?(i.dig("icms", "situation_code")) }
-      f["st"] = { "value" => { "source" => "catalog", "overrides" => [] }, "confidence" => 0.6, "evidence" => "#{pct(st_share)} dos itens com ST destacada/retida — confira a tabela de ST da UF" }
+      f["st"] = { "value" => { "source" => "catalog", "applies" => st_share > 0.05, "overrides" => [] }, "confidence" => (st_share > 0.05 ? [st_share * 2, 0.95].min : 0.8).round(2), "evidence" => "#{pct(st_share)} dos itens com ST destacada/retida" }
 
       pc = pis_cofins_regime(items)
       f["pis_cofins"] = { "value" => { "regime" => pc || (top_crt == "3" ? "cumulative" : "simples") }, "confidence" => pc ? 0.85 : 0.4, "evidence" => pis_cofins_evidence(items) }
