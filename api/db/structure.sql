@@ -798,7 +798,8 @@ CREATE TABLE public.upload_batches (
     files_failed integer DEFAULT 0 NOT NULL,
     errors_log jsonb DEFAULT '[]'::jsonb NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    files_skipped integer DEFAULT 0 NOT NULL
 );
 
 
@@ -841,7 +842,8 @@ CREATE TABLE public.users (
     failed_attempts integer DEFAULT 0 NOT NULL,
     locked_until timestamp(6) without time zone,
     active boolean DEFAULT true NOT NULL,
-    password_changed_at timestamp(6) without time zone
+    password_changed_at timestamp(6) without time zone,
+    otp_last_used_at timestamp(6) without time zone
 );
 
 
@@ -1321,10 +1323,17 @@ CREATE INDEX index_documents_on_client_id ON public.documents USING btree (clien
 
 
 --
+-- Name: index_documents_on_client_id_and_access_key_and_event; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_documents_on_client_id_and_access_key_and_event ON public.documents USING btree (client_id, access_key, kind, COALESCE(((data -> 'event'::text) ->> 'code'::text), ''::text), COALESCE(((data -> 'event'::text) ->> 'sequence'::text), ''::text)) WHERE ((access_key IS NOT NULL) AND ((kind)::text = 'event'::text));
+
+
+--
 -- Name: index_documents_on_client_id_and_access_key_and_kind; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX index_documents_on_client_id_and_access_key_and_kind ON public.documents USING btree (client_id, access_key, kind) WHERE (access_key IS NOT NULL);
+CREATE UNIQUE INDEX index_documents_on_client_id_and_access_key_and_kind ON public.documents USING btree (client_id, access_key, kind) WHERE ((access_key IS NOT NULL) AND ((kind)::text <> 'event'::text));
 
 
 --
@@ -1339,6 +1348,13 @@ CREATE INDEX index_documents_on_client_id_and_period ON public.documents USING b
 --
 
 CREATE INDEX index_documents_on_client_id_and_reference_date ON public.documents USING btree (client_id, reference_date);
+
+
+--
+-- Name: index_documents_on_client_id_and_target_access_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_documents_on_client_id_and_target_access_key ON public.documents USING btree (client_id, target_access_key);
 
 
 --
@@ -1503,6 +1519,13 @@ CREATE INDEX index_fiscal_records_on_fiscal_file_id_and_record_type ON public.fi
 
 
 --
+-- Name: index_fiscal_records_on_parent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_fiscal_records_on_parent_id ON public.fiscal_records USING btree (parent_id);
+
+
+--
 -- Name: index_reference_row_overrides_on_created_by_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1531,10 +1554,10 @@ CREATE INDEX index_reference_rows_on_reference_version_id ON public.reference_ro
 
 
 --
--- Name: index_reference_rows_on_reference_version_id_and_key; Type: INDEX; Schema: public; Owner: -
+-- Name: index_reference_rows_on_version_key_and_effective_from; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_reference_rows_on_reference_version_id_and_key ON public.reference_rows USING btree (reference_version_id, key);
+CREATE UNIQUE INDEX index_reference_rows_on_version_key_and_effective_from ON public.reference_rows USING btree (reference_version_id, key, effective_from) NULLS NOT DISTINCT;
 
 
 --
@@ -1797,6 +1820,14 @@ ALTER TABLE ONLY public.audit_runs
 
 
 --
+-- Name: fiscal_records fk_rails_461b19deff; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fiscal_records
+    ADD CONSTRAINT fk_rails_461b19deff FOREIGN KEY (parent_id) REFERENCES public.fiscal_records(id) ON DELETE CASCADE;
+
+
+--
 -- Name: audit_runs fk_rails_60b040dbde; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1995,6 +2026,10 @@ ALTER TABLE ONLY public.findings
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260909000004'),
+('20260909000003'),
+('20260909000002'),
+('20260909000001'),
 ('20260831000002'),
 ('20260831000001'),
 ('20260830000002'),
