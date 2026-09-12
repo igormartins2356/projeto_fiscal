@@ -6,32 +6,50 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
+import { Form, Field } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import FormField from '../../components/FormField.vue'
 import PageHeader from '../../components/PageHeader.vue'
 import { adminRules, errorMessage } from '../../api/client'
-
-const STATES = ['draft', 'testing', 'shadow', 'published', 'retired']
-const SCOPES = ['item', 'document', 'cross_document', 'period', 'scenario']
-export const STATE_SEVERITY = { draft: 'secondary', testing: 'info', shadow: 'warn', published: 'success', retired: 'danger' }
+import { RULE_SCOPES, RULE_STATES, STATE_SEVERITY } from '../../constants/rules'
+import { newRuleSchema } from '../../schemas/rule'
+import { debounce } from '../../utils/debounce'
+import { fmtDate, todayIso } from '../../utils/date'
 
 export default {
   name: 'AdminRulesView',
-  components: { PageHeader, Button, InputText, Select, DataTable, Column, Tag, Dialog },
+  components: { PageHeader, Form, Field, Button, InputText, Select, DataTable, Column, Tag, Dialog, FormField },
   data() {
-    return { rows: [], total: 0, loading: false, lazy: { page: 1, per_page: 25, q: '', state: null, scope: null }, states: STATES, scopes: SCOPES, sev: STATE_SEVERITY,
-             newDialog: false, newCode: '', busy: false }
+    return { rows: [], total: 0, loading: false, reqId: 0, debouncedSearch: null, lazy: { page: 1, per_page: 25, q: '', state: null, scope: null },
+             states: RULE_STATES, scopes: RULE_SCOPES, sev: STATE_SEVERITY, schema: toTypedSchema(newRuleSchema),
+             newDialog: false, busy: false }
   },
-  created() { this.load() },
-  watch: { 'lazy.q'() { this.lazy.page = 1; this.load() }, 'lazy.state'() { this.lazy.page = 1; this.load() }, 'lazy.scope'() { this.lazy.page = 1; this.load() } },
+  created() {
+    // Busca por código: uma requisição por pausa de digitação, não por tecla.
+    this.debouncedSearch = debounce(() => { this.lazy.page = 1; this.load() }, 300)
+    this.load()
+  },
+  beforeUnmount() { this.debouncedSearch?.cancel() },
+  watch: { 'lazy.q'() { this.debouncedSearch() }, 'lazy.state'() { this.lazy.page = 1; this.load() }, 'lazy.scope'() { this.lazy.page = 1; this.load() } },
   methods: {
+    fmtDate,
     async load() {
       this.loading = true
-      try { const r = await adminRules.list(this.lazy); this.rows = r.data; this.total = r.total } finally { this.loading = false }
+      const seq = ++this.reqId
+      try {
+        const r = await adminRules.list(this.lazy)
+        // Só a última requisição escreve na tabela: a anterior pode chegar depois e reexibir o filtro antigo.
+        if (seq !== this.reqId) return
+        this.rows = r.data; this.total = r.total
+      } catch (e) {
+        if (seq === this.reqId) this.$toast.add({ severity: 'error', summary: 'Falha ao carregar as regras', detail: errorMessage(e), life: 4000 })
+      } finally { if (seq === this.reqId) this.loading = false }
     },
     onPage(e) { this.lazy.page = e.page + 1; this.lazy.per_page = e.rows; this.load() },
-    async create() {
+    async create(values) {
       this.busy = true
-      try { const r = await adminRules.create({ code: this.newCode.trim().toUpperCase(), title: this.newCode, scope: 'item', severity: 'error', effective_from: new Date().toISOString().slice(0, 10) }); this.newDialog = false; this.$router.push(`/admin/rules/${r.id}`) }
-      catch (e) { this.$toast.add({ severity: 'error', summary: 'Falha', detail: errorMessage(e), life: 4000 }) } finally { this.busy = false }
+      try { const r = await adminRules.create({ code: values.code, title: values.code, scope: 'item', severity: 'error', effective_from: todayIso() }); this.newDialog = false; this.$router.push(`/admin/rules/${r.id}`) }
+      catch (e) { this.$toast.add({ severity: 'error', summary: 'Falha ao criar a regra', detail: errorMessage(e), life: 4000 }) } finally { this.busy = false }
     },
   },
 }
@@ -41,9 +59,9 @@ export default {
   <div>
     <PageHeader title="Regras" subtitle="Regras de validação são dados versionados com vigência; o motor só sabe avaliá-las.">
       <template #actions>
-        <InputText v-model.lazy="lazy.q" placeholder="Buscar por código" />
-        <Select v-model="lazy.state" :options="states" placeholder="Estado" showClear />
-        <Select v-model="lazy.scope" :options="scopes" placeholder="Escopo" showClear />
+        <InputText v-model="lazy.q" placeholder="Buscar por código" aria-label="Buscar por código" />
+        <Select v-model="lazy.state" :options="states" placeholder="Estado" aria-label="Filtrar por estado" showClear />
+        <Select v-model="lazy.scope" :options="scopes" placeholder="Escopo" aria-label="Filtrar por escopo" showClear />
         <Button label="Nova regra" icon="pi pi-plus" @click="newDialog = true" />
       </template>
     </PageHeader>
@@ -55,14 +73,21 @@ export default {
       <Column field="scope" header="Escopo" class="w-36" />
       <Column field="severity" header="Severidade" class="w-28" />
       <Column header="Estado" class="w-28"><template #body="{ data }"><Tag :severity="sev[data.state]" :value="data.state" /></template></Column>
-      <Column header="Vigência" class="w-52"><template #body="{ data }"><span class="text-xs">{{ data.effective_from }} → {{ data.effective_until ?? 'aberta' }}</span></template></Column>
+      <Column header="Vigência" class="w-52"><template #body="{ data }"><span class="text-xs">{{ fmtDate(data.effective_from) }} → {{ data.effective_until ? fmtDate(data.effective_until) : 'aberta' }}</span></template></Column>
       <Column header="Origem" class="w-24"><template #body="{ data }"><span class="text-xs">{{ data.source_type }}</span></template></Column>
     </DataTable>
     </div>
     <Dialog v-model:visible="newDialog" modal header="Nova regra (ou nova versão)">
-      <p class="text-sm text-slate-600 mb-2">Informe o código no formato <span class="font-mono">PREFIXO.ASSUNTO.DETALHE</span>. Se já existir, será criada uma nova versão copiando a última.</p>
-      <InputText v-model="newCode" placeholder="ICMS.RATE.INTERSTATE" class="w-full font-mono" />
-      <template #footer><Button label="Cancelar" severity="secondary" @click="newDialog = false" /><Button label="Criar" :loading="busy" :disabled="!newCode" @click="create" /></template>
+      <Form :validation-schema="schema" :initial-values="{ code: '' }" @submit="create" v-slot="{ errors, isSubmitting }">
+        <p class="text-sm text-slate-600 mb-2">Informe o código no formato <span class="font-mono">PREFIXO.ASSUNTO.DETALHE</span>. Se já existir, será criada uma nova versão copiando a última.</p>
+        <Field name="code" v-slot="{ value, handleChange, handleBlur }">
+          <FormField label="Código" :error="errors.code"><InputText :modelValue="value" placeholder="ICMS.RATE.INTERSTATE" class="w-full font-mono" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+        </Field>
+        <div class="flex justify-end gap-2 pt-3">
+          <Button type="button" label="Cancelar" severity="secondary" @click="newDialog = false" />
+          <Button type="submit" label="Criar" :loading="isSubmitting || busy" />
+        </div>
+      </Form>
     </Dialog>
   </div>
 </template>

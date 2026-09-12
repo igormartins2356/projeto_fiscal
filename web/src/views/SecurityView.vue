@@ -1,43 +1,45 @@
 <script>
 import PageHeader from '../components/PageHeader.vue'
 import { mapState, mapActions } from 'pinia'
+import { Form, Field } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
+import FormField from '../components/FormField.vue'
 import { useSession } from '../stores/session'
 import { auth, errorMessage } from '../api/client'
+import { changePasswordSchema, otpDisableSchema, otpEnableSchema } from '../schemas/password'
 
 export default {
   name: 'SecurityView',
-  components: { PageHeader, Button, InputText, Message, Dialog },
+  components: { PageHeader, Form, Field, Button, InputText, Message, Dialog, FormField },
   data() {
     return {
-      setup: null, code: '', backupCodes: null, busy: false,
-      disable: { visible: false, password: '', code: '' },
-      pwd: { current: '', next: '', confirm: '' },
+      setup: null, backupCodes: null, busy: false, disableVisible: false,
+      passwordSchema: toTypedSchema(changePasswordSchema), enableSchema: toTypedSchema(otpEnableSchema), disableSchema: toTypedSchema(otpDisableSchema),
     }
   },
   computed: { ...mapState(useSession, ['user']) },
   methods: {
     ...mapActions(useSession, ['refreshUser']),
+    ...mapActions(useSession, { submitPasswordChange: 'changePassword' }),
     toast(severity, summary, detail) { this.$toast.add({ severity, summary, detail, life: 4000 }) },
     async startSetup() { this.busy = true; try { this.setup = await auth.otpSetup() } catch (e) { this.toast('error', 'Falha', errorMessage(e)) } finally { this.busy = false } },
-    async enable() {
+    async enable(values, { resetForm }) {
       this.busy = true
-      try { const r = await auth.otpEnable(this.code); this.backupCodes = r.backup_codes; this.setup = null; this.code = ''; await this.refreshUser(); this.toast('success', '2FA ativado') }
+      try { const r = await auth.otpEnable(values.code); this.backupCodes = r.backup_codes; this.setup = null; resetForm(); await this.refreshUser(); this.toast('success', '2FA ativado') }
       catch (e) { this.toast('error', 'Código inválido', errorMessage(e)) } finally { this.busy = false }
     },
-    async confirmDisable() {
+    async confirmDisable(values, { resetForm }) {
       this.busy = true
-      try { await auth.otpDisable(this.disable.password, this.disable.code); this.disable = { visible: false, password: '', code: '' }; await this.refreshUser(); this.toast('success', '2FA desativado') }
+      try { await auth.otpDisable(values.password, values.code); this.disableVisible = false; resetForm(); await this.refreshUser(); this.toast('success', '2FA desativado') }
       catch (e) { this.toast('error', 'Falha', errorMessage(e)) } finally { this.busy = false }
     },
-    async changePassword() {
-      if (this.pwd.next !== this.pwd.confirm) return this.toast('warn', 'As senhas não conferem')
-      if (this.pwd.next.length < 10) return this.toast('warn', 'A senha precisa ter ao menos 10 caracteres')
+    async changePassword(values, { resetForm }) {
       this.busy = true
-      try { await auth.changePassword(this.pwd.current, this.pwd.next); this.pwd = { current: '', next: '', confirm: '' }; this.toast('success', 'Senha alterada', 'As outras sessões foram encerradas.') }
+      try { await this.submitPasswordChange(values.current_password, values.password); resetForm(); this.toast('success', 'Senha alterada', 'As sessões abertas nos outros dispositivos foram encerradas.') }
       catch (e) { this.toast('error', 'Falha', errorMessage(e)) } finally { this.busy = false }
     },
   },
@@ -57,17 +59,19 @@ export default {
       </template>
       <template v-else-if="user.otp_enabled">
         <p class="text-sm text-emerald-700">Ativo.</p>
-        <Button label="Desativar 2FA" severity="danger" size="small" @click="disable.visible = true" />
+        <Button label="Desativar 2FA" severity="danger" size="small" @click="disableVisible = true" />
       </template>
       <template v-else-if="setup">
         <p class="text-sm text-slate-600">Escaneie o QR code no seu autenticador (Google Authenticator, Authy, 1Password…) e informe o código gerado.</p>
         <div class="flex gap-6 items-start">
           <div class="w-44 h-44 border border-slate-200 rounded p-1 bg-white" v-html="setup.qr_svg"></div>
-          <div class="space-y-3 flex-1">
+          <Form class="space-y-3 flex-1" :validation-schema="enableSchema" :initial-values="{ code: '' }" @submit="enable" v-slot="{ errors, isSubmitting }">
             <p class="text-xs text-slate-500">Chave manual: <span class="font-mono break-all">{{ setup.secret }}</span></p>
-            <InputText v-model="code" inputmode="numeric" placeholder="000000" />
-            <div class="flex gap-2"><Button label="Ativar" :loading="busy" @click="enable" /><Button label="Cancelar" severity="secondary" @click="setup = null" /></div>
-          </div>
+            <Field name="code" v-slot="{ value, handleChange, handleBlur }">
+              <FormField label="Código do autenticador" :error="errors.code"><InputText :modelValue="value" inputmode="numeric" placeholder="000000" autocomplete="one-time-code" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+            </Field>
+            <div class="flex gap-2"><Button type="submit" label="Ativar" :loading="isSubmitting || busy" /><Button type="button" label="Cancelar" severity="secondary" @click="setup = null" /></div>
+          </Form>
         </div>
       </template>
       <template v-else>
@@ -78,20 +82,37 @@ export default {
 
     <section class="card space-y-3">
       <h2 class="card-title">Alterar senha</h2>
-      <div class="grid grid-cols-3 gap-3">
-        <InputText v-model="pwd.current" type="password" placeholder="Senha atual" autocomplete="current-password" />
-        <InputText v-model="pwd.next" type="password" placeholder="Nova senha (mín. 10)" autocomplete="new-password" />
-        <InputText v-model="pwd.confirm" type="password" placeholder="Confirmar" autocomplete="new-password" />
-      </div>
-      <Button label="Alterar" :loading="busy" :disabled="!pwd.current || !pwd.next" @click="changePassword" />
+      <Form :validation-schema="passwordSchema" :initial-values="{ current_password: '', password: '', password_confirmation: '' }" @submit="changePassword" v-slot="{ errors, isSubmitting }">
+        <div class="grid grid-cols-3 gap-3">
+          <Field name="current_password" v-slot="{ value, handleChange, handleBlur }">
+            <FormField label="Senha atual" :error="errors.current_password"><InputText :modelValue="value" type="password" autocomplete="current-password" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+          </Field>
+          <Field name="password" v-slot="{ value, handleChange, handleBlur }">
+            <FormField label="Nova senha" :error="errors.password" hint="mínimo de 10 caracteres"><InputText :modelValue="value" type="password" autocomplete="new-password" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+          </Field>
+          <Field name="password_confirmation" v-slot="{ value, handleChange, handleBlur }">
+            <FormField label="Confirmar" :error="errors.password_confirmation"><InputText :modelValue="value" type="password" autocomplete="new-password" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+          </Field>
+        </div>
+        <Button type="submit" label="Alterar" class="mt-3" :loading="isSubmitting || busy" />
+      </Form>
     </section>
 
-    <Dialog v-model:visible="disable.visible" modal header="Desativar 2FA">
-      <div class="space-y-3">
-        <InputText v-model="disable.password" type="password" placeholder="Senha" />
-        <InputText v-model="disable.code" placeholder="Código do autenticador" />
-      </div>
-      <template #footer><Button label="Cancelar" severity="secondary" @click="disable.visible = false" /><Button label="Desativar" severity="danger" :loading="busy" @click="confirmDisable" /></template>
+    <Dialog v-model:visible="disableVisible" modal header="Desativar 2FA">
+      <Form :validation-schema="disableSchema" :initial-values="{ password: '', code: '' }" @submit="confirmDisable" v-slot="{ errors, isSubmitting }">
+        <div class="space-y-3">
+          <Field name="password" v-slot="{ value, handleChange, handleBlur }">
+            <FormField label="Senha" :error="errors.password"><InputText :modelValue="value" type="password" autocomplete="current-password" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+          </Field>
+          <Field name="code" v-slot="{ value, handleChange, handleBlur }">
+            <FormField label="Código do autenticador" :error="errors.code" hint="ou um código de backup"><InputText :modelValue="value" inputmode="numeric" autocomplete="one-time-code" @update:modelValue="handleChange" @blur="handleBlur" /></FormField>
+          </Field>
+          <div class="flex justify-end gap-2 pt-2">
+            <Button type="button" label="Cancelar" severity="secondary" @click="disableVisible = false" />
+            <Button type="submit" label="Desativar" severity="danger" :loading="isSubmitting || busy" />
+          </div>
+        </div>
+      </Form>
     </Dialog>
   </div>
 </template>

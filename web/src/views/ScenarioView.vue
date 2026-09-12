@@ -11,10 +11,13 @@ import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
 import FormField from '../components/FormField.vue'
 import TagsInput from '../components/TagsInput.vue'
 import { clientsApi, scenarios, errorMessage } from '../api/client'
 import { taxScenarioSchema, TAX_REGIMES, ACTIVITIES, UFS } from '../schemas/taxScenario'
+import { fmtDate, todayIso } from '../utils/date'
 
 const ACTIVITY_LABELS = { commerce: 'Comércio', industry: 'Indústria', service: 'Serviços', rural: 'Rural' }
 const BENEFIT_KINDS = [
@@ -25,11 +28,11 @@ const PIS_REGIMES = [{ value: 'simples', label: 'Simples Nacional' }, { value: '
 const IBS_REGIMES = [{ value: 'regular', label: 'Regular' }, { value: 'simples_nacional_opt_in', label: 'Simples com opção IBS/CBS por fora' }]
 const EMPTY = { tax_regime: undefined, uf: 'SP', city_code: '', icms_taxpayer: true, ipi_taxpayer: false, iss_taxpayer: false, activity: [], cnae: { primary: '', secondary: [] },
   sells_to_final_consumer: false, uses_nfce: false, exports: false, imports: false, st: { source: 'catalog', applies: false, overrides: [] }, benefits: [],
-  pis_cofins: { regime: undefined }, ibs_cbs: { regime: 'regular' }, effective_from: new Date().toISOString().slice(0, 10), effective_until: null }
+  pis_cofins: { regime: undefined }, ibs_cbs: { regime: 'regular' }, effective_from: '', effective_until: null }
 
 export default {
   name: 'ScenarioView',
-  components: { PageHeader, Form, Field, FieldArray, Button, InputText, Select, Checkbox, Dialog, Message, Tag, FormField, TagsInput },
+  components: { PageHeader, Form, Field, FieldArray, Button, InputText, Select, Checkbox, Dialog, Message, Tag, DataTable, Column, FormField, TagsInput },
   props: { id: { type: String, required: true } },
   setup(props) {
     const queryClient = useQueryClient()
@@ -56,7 +59,7 @@ export default {
   methods: {
     toast(severity, summary, detail) { this.$toast.add({ severity, summary, detail, life: 4000 }) },
     newVersion(base = null) {
-      const src = base ? { ...EMPTY, ...base.data, effective_from: new Date().toISOString().slice(0, 10), effective_until: null } : { ...EMPTY, uf: this.client.data?.uf ?? 'SP', city_code: this.client.data?.city_code ?? '' }
+      const src = base ? { ...EMPTY, ...base.data, effective_from: todayIso(), effective_until: null } : { ...EMPTY, effective_from: todayIso(), uf: this.client.data?.uf ?? 'SP', city_code: this.client.data?.city_code ?? '' }
       this.editing = { sid: null, initial: src, fieldOrigins: base ? { ...base.field_origins } : {} }
     },
     edit(s) { this.editing = { sid: s.id, initial: { ...EMPTY, ...s.data, effective_from: s.effective_from, effective_until: s.effective_until }, fieldOrigins: { ...s.field_origins } } },
@@ -68,7 +71,7 @@ export default {
       } catch (e) { this.toast('error', 'Falha ao salvar', errorMessage(e)) }
     },
     async doPublish(s) {
-      this.$confirm.require({ header: 'Publicar cenário', message: `Publicar a versão vigente a partir de ${s.effective_from}? A versão anterior será encerrada no dia anterior.`, acceptLabel: 'Publicar', rejectLabel: 'Cancelar',
+      this.$confirm.require({ header: 'Publicar cenário', message: `Publicar a versão vigente a partir de ${fmtDate(s.effective_from)}? A versão anterior será encerrada no dia anterior.`, acceptLabel: 'Publicar', rejectLabel: 'Cancelar',
         accept: async () => { try { await this.publish.mutateAsync(s.id); this.toast('success', 'Cenário publicado') } catch (e) { this.toast('error', 'Cenário inválido', (e?.response?.data?.errors ?? [errorMessage(e)]).join('; ')) } } })
     },
     doDestroy(s) { this.$confirm.require({ header: 'Excluir rascunho', message: 'Excluir este rascunho?', acceptLabel: 'Excluir', rejectLabel: 'Cancelar', accept: () => this.destroy.mutate(s.id) }) },
@@ -86,6 +89,9 @@ export default {
       this.toast('info', 'Proposta aplicada', 'Revise cada campo antes de salvar.')
     },
     confidenceSeverity(c) { return c >= 0.85 ? 'success' : c >= 0.6 ? 'warn' : 'error' },
+    fmtDate,
+    regimeLabel(v) { return this.regimes.find(r => r.value === v)?.label ?? v },
+    proposalRows() { return Object.entries(this.proposal?.fields ?? {}).map(([field, f]) => ({ field, ...f })) },
     fmt(v) { return typeof v === 'object' ? JSON.stringify(v) : String(v) },
     stateSeverity(s) { return s === 'published' ? 'success' : 'secondary' },
   },
@@ -99,19 +105,21 @@ export default {
     </PageHeader>
 
     <!-- Versões -->
-    <div v-if="!editing" class="card !p-0 divide-y divide-surface">
-      <div v-for="s in versions" :key="s.id" class="flex items-center gap-3 px-4 py-3 text-sm">
-        <Tag :severity="stateSeverity(s.state)" :value="s.state === 'published' ? 'publicado' : 'rascunho'" />
-        <span>{{ s.effective_from }} → {{ s.effective_until ?? 'em aberto' }}</span>
-        <span class="text-slate-500">{{ regimes.find(r => r.value === s.data.tax_regime)?.label ?? s.data.tax_regime }} · {{ s.data.uf }}</span>
-        <div class="ml-auto flex gap-1">
-          <Button v-if="s.state === 'draft'" label="Editar" size="small" severity="secondary" @click="edit(s)" />
-          <Button v-if="s.state === 'draft'" label="Publicar" size="small" @click="doPublish(s)" />
-          <Button v-if="s.state === 'draft'" label="Excluir" size="small" severity="danger" @click="doDestroy(s)" />
-          <Button v-else label="Duplicar" size="small" severity="secondary" @click="newVersion(s)" />
-        </div>
-      </div>
-      <p v-if="!versions.length && !list.isPending" class="px-4 py-6 text-center text-slate-500 text-sm">Nenhum cenário. Crie uma versão — ou infira a partir das notas já enviadas.</p>
+    <div v-if="!editing" class="card">
+      <DataTable :value="versions" :loading="list.isPending" dataKey="id" size="small">
+        <Column header="Situação" class="w-32"><template #body="{ data }"><Tag :severity="stateSeverity(data.state)" :value="data.state === 'published' ? 'publicado' : 'rascunho'" /></template></Column>
+        <Column header="Vigência" class="w-56"><template #body="{ data }">{{ fmtDate(data.effective_from) }} → {{ data.effective_until ? fmtDate(data.effective_until) : 'em aberto' }}</template></Column>
+        <Column header="Regime"><template #body="{ data }"><span class="text-slate-500">{{ regimeLabel(data.data.tax_regime) }} · {{ data.data.uf }}</span></template></Column>
+        <Column class="w-72"><template #body="{ data }">
+          <div class="flex justify-end gap-1">
+            <Button v-if="data.state === 'draft'" label="Editar" size="small" severity="secondary" @click="edit(data)" />
+            <Button v-if="data.state === 'draft'" label="Publicar" size="small" @click="doPublish(data)" />
+            <Button v-if="data.state === 'draft'" label="Excluir" size="small" severity="danger" @click="doDestroy(data)" />
+            <Button v-else label="Duplicar" size="small" severity="secondary" @click="newVersion(data)" />
+          </div>
+        </template></Column>
+        <template #empty><div class="empty-state"><i class="pi pi-sitemap"></i>Nenhum cenário. Crie uma versão — ou infira a partir das notas já enviadas.</div></template>
+      </DataTable>
     </div>
 
     <!-- Editor -->
@@ -226,12 +234,14 @@ export default {
 
         <Dialog v-model:visible="inferDialog" modal header="Proposta de cenário a partir das notas" class="!max-w-3xl">
           <div v-if="proposal" class="space-y-3 text-sm">
-            <p class="text-slate-600">{{ proposal.sample.documents }} documentos e {{ proposal.sample.items }} itens emitidos desde {{ proposal.sample.since }}.</p>
+            <p class="text-slate-600">{{ proposal.sample.documents }} documentos{{ proposal.sample.items == null ? '' : ` e ${proposal.sample.items} itens` }} emitidos desde {{ fmtDate(proposal.sample.since) }}.</p>
             <p v-if="proposal.message" class="text-amber-700">{{ proposal.message }}</p>
-            <table class="w-full text-xs">
-              <thead class="text-left text-slate-500 uppercase"><tr><th class="py-1">Campo</th><th>Valor proposto</th><th>Confiança</th><th>Evidência</th></tr></thead>
-              <tbody><tr v-for="(f, k) in proposal.fields" :key="k" class="border-t border-slate-100"><td class="py-1 font-mono">{{ k }}</td><td class="font-mono">{{ fmt(f.value) }}</td><td><Tag :severity="confidenceSeverity(f.confidence)" :value="Math.round(f.confidence * 100) + '%'" /></td><td class="text-slate-600">{{ f.evidence }}</td></tr></tbody>
-            </table>
+            <DataTable :value="proposalRows()" dataKey="field" size="small">
+              <Column field="field" header="Campo" class="w-56"><template #body="{ data }"><span class="mono text-xs">{{ data.field }}</span></template></Column>
+              <Column header="Valor proposto"><template #body="{ data }"><span class="mono text-xs">{{ fmt(data.value) }}</span></template></Column>
+              <Column header="Confiança" class="w-28"><template #body="{ data }"><Tag :severity="confidenceSeverity(data.confidence)" :value="Math.round(data.confidence * 100) + '%'" /></template></Column>
+              <Column field="evidence" header="Evidência"><template #body="{ data }"><span class="text-slate-600 text-xs">{{ data.evidence }}</span></template></Column>
+            </DataTable>
           </div>
           <template #footer><Button label="Fechar" severity="secondary" @click="inferDialog = false" /><Button label="Aplicar ao formulário" :disabled="!proposal || !Object.keys(proposal.fields).length" @click="applyProposal(setValues)" /></template>
         </Dialog>

@@ -18,7 +18,9 @@ export async function exportXlsx(rows, columns, filename) {
 }
 
 export function exportCsv(rows, columns, filename) {
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  // Texto de terceiros (xProd, infCpl) começando com = + - @ TAB CR seria executado como fórmula ao abrir no Excel/LibreOffice;
+  // o apóstrofo inicial força a célula a texto (OWASP CSV injection).
+  const esc = v => { const s = String(v ?? ''); return `"${(/^[=+\-@\t\r]/.test(s) ? "'" + s : s).replace(/"/g, '""')}"` }
   const lines = [columns.map(c => esc(c.header)).join(';'), ...rows.map(r => columns.map(c => esc(c.value ? c.value(r) : r[c.field])).join(';'))]
   download(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }), filename)
 }

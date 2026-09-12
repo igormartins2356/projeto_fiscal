@@ -41,7 +41,9 @@ export default {
       ]
     },
   },
-  watch: { clients(list) { if (list.length && !this.clientId) this.restore(list) } },
+  // A cada mudança da lista (login de outro usuário, cliente desativado) revalidamos a seleção:
+  // restore mantém o cliente atual se ele ainda existir, senão cai no salvo/primeiro — ou em nenhum.
+  watch: { clients(list) { this.restore(list) } },
   methods: {
     ...mapActions(useSession, ['select', 'restore', 'logout']),
     onSelect(id) { this.select(id); if (!this.$route.path.startsWith('/runs')) this.$router.push('/runs') },
@@ -59,11 +61,11 @@ export default {
       </nav>
     </div>
     <div class="topbar-end">
-      <Select class="w-72" :modelValue="clientId" :options="clients" optionValue="id" optionLabel="legal_name" placeholder="Selecione o cliente" filter :loading="clientsQuery.isPending" @update:modelValue="onSelect">
+      <Select class="w-72" aria-label="Cliente selecionado" :modelValue="clientId" :options="clients" optionValue="id" optionLabel="legal_name" placeholder="Selecione o cliente" filter :loading="clientsQuery.isPending" @update:modelValue="onSelect">
         <template #value="{ value, placeholder }"><span v-if="value" class="flex items-center gap-2"><i class="pi pi-building text-secondary"></i>{{ clients.find(c => c.id === value)?.legal_name }}</span><span v-else>{{ placeholder }}</span></template>
         <template #option="{ option }"><div><div>{{ option.legal_name }}</div><div class="text-xs text-secondary mono">{{ option.cnpj }}</div></div></template>
       </Select>
-      <Button type="button" text rounded class="ml-1" @click="$refs.profile.toggle($event)" aria-haspopup="true" aria-controls="profile_menu">
+      <Button type="button" text rounded class="ml-1" :aria-label="`Conta de ${user?.name ?? 'usuário'}`" @click="$refs.profile.toggle($event)" aria-haspopup="true" aria-controls="profile_menu">
         <Avatar :label="initials" shape="circle" class="bg-primary text-white font-semibold" />
       </Button>
       <Menu ref="profile" id="profile_menu" :model="profileItems" popup />
