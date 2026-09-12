@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+  <evento versao="1.00">
+    <infEvento Id="ID1101103526031234567800019055001000001234100001234501">
+      <cOrgao>35</cOrgao><tpAmb>1</tpAmb><CNPJ>12345678000190</CNPJ>
+      <chNFe>35260312345678000190550010000012341000012345</chNFe>
+      <dhEvento>2026-03-14T11:00:00-03:00</dhEvento><tpEvento>110110</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento>
+      <detEvento versao="1.00"><descEvento>Carta de Correcao</descEvento><xCorrecao>Corrige a descricao do produto A para Produto A1</xCorrecao></detEvento>
+    </infEvento>
+  </evento>
+  <retEvento versao="1.00">
+    <infEvento><tpAmb>1</tpAmb><verAplic>SP_EVENTOS_PL_100</verAplic><cOrgao>35</cOrgao><cStat>135</cStat><xMotivo>Evento registrado e vinculado a NF-e</xMotivo>
+      <chNFe>35260312345678000190550010000012341000012345</chNFe><tpEvento>110110</tpEvento><nSeqEvento>1</nSeqEvento><dhRegEvento>2026-03-14T11:00:05-03:00</dhRegEvento><nProt>135260000000002</nProt></infEvento>
+  </retEvento>
+</procEventoNFe>

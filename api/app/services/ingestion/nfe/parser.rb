@@ -7,6 +7,7 @@ module Ingestion
       PURPOSE = { "1" => "normal", "2" => "complementary", "3" => "adjustment", "4" => "return" }
       SCOPE = { "1" => "intrastate", "2" => "interstate", "3" => "foreign" }
       IE_IND = { "1" => "taxpayer", "2" => "exempt", "9" => "non_taxpayer" }
+      ENVIRONMENT = { "1" => "production", "2" => "homologation" }
       EMISSION = { "1" => "normal", "2" => "contingency_fsda", "4" => "epec", "6" => "svc_an", "7" => "svc_rs", "9" => "offline_nfce" }
       PRESENCE = { "0" => "not_applicable", "1" => "in_person", "2" => "internet", "3" => "phone", "4" => "home_delivery", "5" => "in_person_off_premises", "9" => "other" }
       FREIGHT = { "0" => "issuer_cif", "1" => "recipient_fob", "2" => "third_party", "3" => "own_sender", "4" => "own_recipient", "9" => "no_freight" }
@@ -39,7 +40,7 @@ module Ingestion
           "access_key" => inf["Id"].to_s.sub(/\ANFe/, ""),
           "layout_version" => inf["versao"],
           "xml_hash" => Digest::SHA256.hexdigest(@raw),
-          "environment" => t(ide, "tpAmb") == "1" ? "production" : "homologation",
+          "environment" => ENVIRONMENT[t(ide, "tpAmb")],
           "issuance" => compact(
             "issued_at" => t(ide, "dhEmi"), "dispatched_at" => t(ide, "dhSaiEnt"), "series" => t(ide, "serie"),
             "number" => int(t(ide, "nNF")), "numeric_code" => t(ide, "cNF"), "emission_type" => EMISSION[t(ide, "tpEmis")],
@@ -66,7 +67,7 @@ module Ingestion
         rt = inf.at("infRespTec")
         doc["technical_responsible"] = compact("cnpj" => t(rt, "CNPJ"), "contact" => t(rt, "xContato"), "email" => t(rt, "email"), "phone" => t(rt, "fone")) if rt
         doc["layout_groups"] = layout_groups(doc)
-        doc
+        doc.compact
       end
 
       private
@@ -240,21 +241,21 @@ module Ingestion
         ret = @xml.at("//retEvento/infEvento")
         det = e.at("detEvento")
         { "schema_version" => 1, "kind" => "event", "access_key" => t(e, "chNFe"), "xml_hash" => Digest::SHA256.hexdigest(@raw),
-          "environment" => t(e, "tpAmb") == "1" ? "production" : "homologation",
+          "environment" => ENVIRONMENT[t(e, "tpAmb")],
           "event" => compact("code" => t(e, "tpEvento"), "kind" => EVENT_KIND[t(e, "tpEvento")], "sequence" => int(t(e, "nSeqEvento")), "occurred_at" => t(e, "dhEvento"),
                              "author" => t(e, "CNPJ") || t(e, "CPF"), "justification" => t(det, "xJust"), "correction_text" => t(det, "xCorrecao"),
                              "referenced_protocol" => t(det, "nProt"), "replacement_access_key" => t(det, "chNFeRef")),
-          "protocol" => ret ? compact("number" => t(ret, "nProt"), "received_at" => t(ret, "dhRegEvento"), "status_code" => t(ret, "cStat")) : {} }
+          "protocol" => ret ? compact("number" => t(ret, "nProt"), "received_at" => t(ret, "dhRegEvento"), "status_code" => t(ret, "cStat")) : {} }.compact
       end
 
       def parse_invalidation
         i = @xml.at("//inutNFe/infInut") or raise InvalidXml, "infInut not found"
         ret = @xml.at("//retInutNFe/infInut")
         { "schema_version" => 1, "kind" => "invalidation", "xml_hash" => Digest::SHA256.hexdigest(@raw),
-          "environment" => t(i, "tpAmb") == "1" ? "production" : "homologation",
+          "environment" => ENVIRONMENT[t(i, "tpAmb")],
           "invalidation" => compact("cnpj" => t(i, "CNPJ"), "uf_code" => t(i, "cUF"), "year" => t(i, "ano"), "model" => t(i, "mod"), "series" => t(i, "serie"),
                                     "first_number" => int(t(i, "nNFIni")), "last_number" => int(t(i, "nNFFin")), "justification" => t(i, "xJust")),
-          "protocol" => ret ? compact("number" => t(ret, "nProt"), "received_at" => t(ret, "dhRecbto"), "status_code" => t(ret, "cStat")) : {} }
+          "protocol" => ret ? compact("number" => t(ret, "nProt"), "received_at" => t(ret, "dhRecbto"), "status_code" => t(ret, "cStat")) : {} }.compact
       end
 
       def layout_groups(doc)
