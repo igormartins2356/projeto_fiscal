@@ -33,11 +33,24 @@ module Accounts
     # ---- TOTP ----
     def otp_provisioning_uri = ROTP::TOTP.new(otp_secret, issuer: "Validador Fiscal").provisioning_uri(email)
 
+    # `after:` impede que o mesmo código de 6 dígitos seja aceito duas vezes dentro da janela de drift
+    # (~90 s) — sem isso, um código capturado vale para uma segunda sessão ou para desativar o 2FA.
     def verify_otp(code)
       return false if otp_secret.blank?
       totp = ROTP::TOTP.new(otp_secret)
-      return true if totp.verify(code.to_s.delete(" "), drift_behind: 30, drift_ahead: 30)
+      used_at = totp.verify(code.to_s.delete(" "), drift_behind: 30, drift_ahead: 30, after: otp_last_used_at&.to_i)
+      if used_at
+        update_columns(otp_last_used_at: Time.zone.at(used_at))
+        return true
+      end
       consume_backup_code!(code)
+    end
+
+    # Conta inexistente precisa custar o mesmo bcrypt de uma existente; senão o tempo de resposta enumera e-mails.
+    def self.dummy_authenticate(password)
+      @dummy_digest ||= BCrypt::Password.create(SecureRandom.hex(16),
+                                                cost: ActiveModel::SecurePassword.min_cost ? BCrypt::Engine::MIN_COST : BCrypt::Engine.cost)
+      BCrypt::Password.new(@dummy_digest) == password.to_s
     end
 
     def generate_backup_codes!

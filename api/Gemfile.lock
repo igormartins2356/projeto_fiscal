@@ -347,14 +347,14 @@ DEPENDENCIES
   csv
   debug
   factory_bot_rails
-  jwt
+  jwt (~> 3.2)
   nokogiri
   pg (~> 1.1)
   puma (>= 5.0)
-  rack-attack
-  rack-cors
+  rack-attack (~> 6.8)
+  rack-cors (~> 3.0)
   rails (~> 8.1.3, >= 8.1.3.1)
-  rotp
+  rotp (~> 6.3)
   rqrcode
   rspec-rails (~> 8.0)
   rubocop-rails-omakase

@@ -35,7 +35,7 @@ RSpec.describe "Auth", type: :request do
     expect(response).to have_http_status(:unauthorized)
     expect(user.reload.locked?).to be true
     login
-    expect(response.parsed_body["error"]).to include("bloqueada")
+    expect(response.parsed_body["error"]).to eq("credenciais inválidas") # mensagem genérica: não revela que a conta existe
   end
 
   it "requires auth and scopes clients by firm" do
@@ -64,7 +64,8 @@ RSpec.describe "Auth", type: :request do
     expect(body["mfa_required"]).to be true
     post "/api/v1/auth/mfa", params: { mfa_token: body["mfa_token"], code: "000000" }
     expect(response).to have_http_status(:unauthorized)
-    post "/api/v1/auth/mfa", params: { mfa_token: body["mfa_token"], code: ROTP::TOTP.new(secret).now }
+    # janela seguinte: o código usado no enable não pode ser reaproveitado no login
+    post "/api/v1/auth/mfa", params: { mfa_token: body["mfa_token"], code: ROTP::TOTP.new(secret).at(Time.now + 30) }
     expect(response.parsed_body["access_token"]).to be_present
     post "/api/v1/auth/mfa", params: { mfa_token: login["mfa_token"], code: backup.first }
     expect(response).to have_http_status(:ok)

@@ -6,11 +6,20 @@ module Api
 
         # POST /auth/login → tokens ou desafio MFA
         def login
-          user = Accounts::User.active.find_by(email: params.require(:email).to_s.strip.downcase)
-          if user.nil? || user.locked? || !user.authenticate(params.require(:password))
+          email = params.require(:email).to_s.strip.downcase
+          # Exigir a senha ANTES de olhar a conta: com o require dentro do `if`, faltar `password` dava 400 para
+          # e-mail existente e 401 para inexistente — o status enumerava contas que a mensagem única escondia.
+          password = params.require(:password)
+          user = Accounts::User.active.find_by(email:)
+          if user.nil? || user.locked? || !user.authenticate(password)
+            # Mesma mensagem e mesmo custo de bcrypt em todos os casos: distinguir "bloqueada" de "inválida"
+            # (ou responder mais rápido para e-mail inexistente) revela quais contas existem.
+            # Conta bloqueada não chega a chamar `authenticate`: sem o dummy, o tempo de resposta separaria
+            # "bloqueada" de "senha errada".
+            Accounts::User.dummy_authenticate(password) if user.nil? || user.locked?
             user&.register_failed_attempt!
             Audit::AuditLog.record!("login_failed", user:, ip: request.remote_ip, email: params[:email].to_s.first(100), locked: user&.locked?)
-            return render json: { error: user&.locked? ? "conta bloqueada temporariamente" : "credenciais inválidas" }, status: :unauthorized
+            return render json: { error: "credenciais inválidas" }, status: :unauthorized
           end
           if user.otp_enabled
             render json: { mfa_required: true, mfa_token: ::Auth::Tokens.issue_mfa(user) }
@@ -23,6 +32,12 @@ module Api
         def mfa
           payload = ::Auth::Tokens.decode(params.require(:mfa_token), purpose: "mfa")
           user = Accounts::User.active.find(payload["sub"])
+          # Sem esta checagem o bloqueio da conta não vale para o segundo fator: com a senha vazada e um
+          # mfa_token válido (5 min), o código de 6 dígitos podia ser tentado sem limite.
+          if user.locked?
+            Audit::AuditLog.record!("mfa_blocked", user:, ip: request.remote_ip)
+            return render json: { error: "conta bloqueada temporariamente" }, status: :unauthorized
+          end
           unless user.verify_otp(params.require(:code))
             user.register_failed_attempt!
             Audit::AuditLog.record!("mfa_failed", user:, ip: request.remote_ip)

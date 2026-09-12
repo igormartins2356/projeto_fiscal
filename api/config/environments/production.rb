@@ -45,6 +45,8 @@ Rails.application.configure do
 
   # Replace the default in-process memory cache store with a durable alternative.
   # config.cache_store = :mem_cache_store
+  # (o contador do Rack::Attack não usa o Rails.cache em produção: usa o Redis — ver config/initializers/rack_attack.rb,
+  #  que exige REDIS_URL no boot justamente para não cair no cache por container)
 
   # Replace the default in-process and non-durable queuing backend for Active Job.
   # config.active_job.queue_adapter = :resque
@@ -75,12 +77,12 @@ Rails.application.configure do
   # Only use :id for inspections in production.
   config.active_record.attributes_for_inspect = [ :id ]
 
-  # Enable DNS rebinding protection and other `Host` header attacks.
-  # config.hosts = [
-  #   "example.com",     # Allow requests from example.com
-  #   /.*\.example\.com/ # Allow requests from subdomains like `www.example.com`
-  # ]
-  #
+  # Proteção contra DNS rebinding / Host header: hosts autorizados vêm do deploy (lista separada por vírgula).
+  # Lista vazia DESLIGA a proteção — faltar a variável precisa quebrar o boot, não abrir a porta em silêncio.
+  allowed_hosts = ENV.fetch("ALLOWED_HOSTS", "").split(",").map(&:strip).reject(&:empty?)
+  raise "ALLOWED_HOSTS não configurado: sem a lista de hosts autorizados a proteção contra Host header/DNS rebinding fica desligada" if allowed_hosts.empty?
+  config.hosts = allowed_hosts
+
   # Skip DNS rebinding protection for the default health check endpoint.
-  # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
 end
