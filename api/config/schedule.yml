@@ -13,3 +13,7 @@ catalog_review_reminder:
   cron: "0 6 * * *"          # diária: tabelas com next_review_on vencido
   class: "Catalog::ReviewReminderJob"
   queue: catalog
+sefaz_docs_sync:
+  cron: "0 7 * * *"          # diária: documentação oficial da NF-e/NFC-e (manual, schema, nota e informe técnico)
+  class: "Sefaz::SyncJob"
+  queue: catalog

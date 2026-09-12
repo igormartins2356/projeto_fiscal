@@ -15,3 +15,5 @@
 !/.env*.erb
 /db/*.sqlite3*
 /coverage
+# Documentação oficial baixada do portal da NF-e: o manifesto é versionado, os arquivos não
+/storage/sefaz/

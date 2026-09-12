@@ -204,10 +204,42 @@ Para `st_uf` e `icms_internal_rate` por produto, assinar uma base pronta (Systax
 
 ---
 
+## 3.5 Documentação oficial da NF-e/NFC-e (espelho local)
+
+O Portal da Nota Fiscal Eletrônica publica quatro seções que descrevem o leiaute e as regras de
+validação que a SEFAZ aplica: **manuais**, **esquemas XML**, **notas técnicas** e **informes
+técnicos**. É a fonte primária das regras de rejeição, e por isso vale manter um espelho local.
+
+`Sefaz::DocumentSync` (rake `sefaz:sync`, job diário `Sefaz::SyncJob` às 07:00) mantém esse espelho.
+A divisão é deliberada:
+
+| O quê | Onde | No git? |
+|---|---|---|
+| Manifesto: rótulo, arquivo, tamanho, resumo SHA-256, data de publicação e data da coleta | `api/db/data/sefaz/manifest.json` | **sim** |
+| Os arquivos (PDF, ZIP com XSD) | `api/storage/sefaz/<seção>/` | não |
+
+O manifesto versionado é a peça útil: o diff dele entre duas sincronizações mostra exatamente o que a
+SEFAZ publicou ou alterou, e é esse o gatilho para revisar regra. Os arquivos ficam fora porque são
+centenas de megabytes e podem ser rebaixados a qualquer momento.
+
+A sincronização é incremental: a listagem de cada seção é sempre lida, mas o documento já conhecido só
+é rebaixado quando o tamanho informado pelo servidor muda, ou quando o arquivo não está mais em disco.
+Falha em um documento não interrompe os outros — fica registrada no resultado e no log de auditoria
+(`sefaz_docs_synced`).
+
+Detalhe de implementação que já custou tempo: o portal emite o token do documento com **espaço** no
+lugar do `+` do base64, e exige cookie de sessão antes da primeira listagem. Sem o cookie, a listagem
+volta vazia; sem escapar o espaço, o download quebra.
+
+`rake sefaz:inventory` resume o que há no espelho, por seção.
+
+---
+
 ## 4. Pendências
 
 - [x] **UFs prioritárias: Sudeste (SP, MG, RJ, ES)** — decidido em 29/08/2026. Escopo inicial de `st_uf` e `icms_internal_rate` por produto; demais UFs só alíquota geral + FCP. ES é relevante também por ser exceção na alíquota interestadual (12% mesmo vindo do Sul/Sudeste).
 - [x] Certificado ICP-Brasil para a API da SVRS: **emitir um e-CNPJ A1 para a plataforma** (decidido em 29/08/2026). Guardar em KMS/Vault, nunca no banco; renovar anualmente.
 - [ ] Testar o parser do Guia Prático (PDF → JSON) com os leiautes 019 e 020 antes de assumir classe B
+- [ ] **Extrair regra da documentação espelhada (§3.5):** as notas técnicas e o manual de orientação traem a tabela de rejeições da SEFAZ em texto; transformá-la em regra da DSL é o caminho para cobrir validação de leiaute sem escrever caso a caso
 - [ ] **Reprodutibilidade do catálogo:** `tipi`, `cest`, `st_uf` e `icms_internal_rate` v2 só existem no banco onde foram importadas à mão. Versionar os arquivos-fonte em `db/data/` (ou escrever os importadores) para que `db:seed` + um comando reconstruam o catálogo inteiro
 - [x] Portal SPED migrou para **`https://www.gov.br/sped/pt-br`** (confirmado em 29/08/2026); as URLs `sped.rfb.gov.br` abaixo são históricas e devem ser trocadas ao escrever os importadores.
