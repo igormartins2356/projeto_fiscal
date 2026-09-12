@@ -7,10 +7,16 @@ module Ingestion
       dir = @root.join(client.id.to_s, hash[0, 2])
       FileUtils.mkdir_p(dir)
       path = dir.join("#{hash}.xml")
-      File.write(path, xml) unless path.exist?
+      File.binwrite(path, xml) unless path.exist?
       path.relative_path_from(@root).to_s
     end
 
-    def read(ref) = File.read(@root.join(ref))
+    # Só para XML recusado na importação (homologação, documento de terceiro), que não vira `document`.
+    def delete(ref)
+      path = @root.join(ref)
+      File.delete(path) if path.to_s.start_with?(@root.to_s) && File.exist?(path)
+    end
+
+    def read(ref) = File.binread(@root.join(ref))   # XML de ERP costuma vir em ISO-8859-1; quem decide a codificação é o parser
   end
 end

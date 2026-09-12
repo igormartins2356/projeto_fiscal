@@ -1,3 +1,6 @@
 .env
 *.log
 .DS_Store
+
+# Configuração local dos agentes e skills do Claude Code
+.claude/

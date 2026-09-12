@@ -6,8 +6,13 @@ module Rules
 
       def self.register(name) = REGISTRY[name] = self
       def self.find(name)
-        REGISTRY[name] || "Rules::Primitives::#{name.to_s.camelize}".safe_constantize.tap { |k| k&.register(name) } ||
-          raise(EvaluationError, "unknown primitive #{name}")
+        REGISTRY[name] || begin
+          klass = "Rules::Primitives::#{name.to_s.camelize}".safe_constantize
+          # "base" resolveria para esta classe abstrata e explodiria com NotImplementedError no meio do run
+          raise(EvaluationError, "unknown primitive #{name}") unless klass.is_a?(Class) && klass < Base
+          klass.register(name)
+          klass
+        end
       end
       def self.scope(s = nil) = s ? (@scope = s) : @scope
       def self.params_schema(h = nil) = h ? (@params_schema = h) : (@params_schema || {})
@@ -22,6 +27,17 @@ module Rules
 
       # Retorna array de Hash: { target: {document:, item_number:}, evidence: {}, vars: {} }
       def call = raise(NotImplementedError)
+
+      private
+
+      # Param sem default: valor fiscal (prazo, COD_SIT, modelo) é dado da regra, não do código.
+      def param!(name)
+        v = @params[name]
+        raise EvaluationError, "primitiva #{self.class.name.demodulize.underscore}: parâmetro '#{name}' obrigatório e não informado na regra" if v.nil? || (v.respond_to?(:empty?) && v.empty?)
+        v
+      end
+
+      def dec(v) = Dsl::Value.to_decimal(v)
     end
   end
 end

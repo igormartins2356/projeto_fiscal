@@ -8,8 +8,18 @@ export default {
   components: { Textarea, Button },
   props: { modelValue: { type: [Object, Array], default: () => ({}) }, rows: { type: Number, default: 18 } },
   emits: ['update:modelValue', 'error'],
-  data() { return { text: JSON.stringify(this.modelValue, null, 2), error: null } },
-  watch: { modelValue(v) { const t = JSON.stringify(v, null, 2); if (t !== this.text && !this.error) this.text = t } },
+  data() { return { text: JSON.stringify(this.modelValue, null, 2), error: null, focused: false } },
+  // Só reescreve o texto quando o valor recebido difere do que está digitado *semanticamente* e o campo não está em foco:
+  // reformatar a cada tecla (ou a cada objeto novo vindo do pai) fazia o cursor pular para o fim.
+  watch: {
+    modelValue(v) {
+      if (this.focused || this.error) return
+      let current
+      try { current = JSON.parse(this.text) } catch { return }
+      if (JSON.stringify(current) === JSON.stringify(v)) return
+      this.text = JSON.stringify(v, null, 2)
+    },
+  },
   methods: {
     onInput(t) {
       this.text = t
@@ -23,7 +33,7 @@ export default {
 
 <template>
   <div class="space-y-1">
-    <Textarea :modelValue="text" :rows="rows" class="w-full font-mono text-xs" spellcheck="false" @update:modelValue="onInput" />
+    <Textarea :modelValue="text" :rows="rows" class="w-full font-mono text-xs" spellcheck="false" @update:modelValue="onInput" @focus="focused = true" @blur="focused = false" />
     <div class="flex items-center gap-2 text-xs"><span v-if="error" class="text-red-700">JSON inválido: {{ error }}</span><Button label="Formatar" text size="small" :disabled="!!error" @click="format" /></div>
   </div>
 </template>

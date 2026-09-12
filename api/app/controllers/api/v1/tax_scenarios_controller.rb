@@ -18,6 +18,7 @@ module Api
       def update
         return render json: { error: "cenário publicado não pode ser editado; crie uma nova versão" }, status: :unprocessable_entity unless @scenario.state == "draft"
         @scenario.update!(scenario_params)
+        audit!("scenario_updated", subject: @scenario)
         render json: serialize(@scenario)
       end
 
@@ -37,12 +38,13 @@ module Api
       def destroy
         return render json: { error: "só rascunhos podem ser excluídos" }, status: :unprocessable_entity unless @scenario.state == "draft"
         @scenario.destroy!
+        audit!("scenario_deleted", subject: @scenario)
         head :no_content
       end
 
       # POST /clients/:client_id/tax_scenarios/infer → proposta a partir das notas (não persiste)
       def infer
-        render json: Scenario::Inference.new(@client, months: params.fetch(:months, 6).to_i).call
+        render json: Scenario::Inference.new(@client, months: params.fetch(:months, 6).to_i.clamp(1, 36)).call
       end
 
       private

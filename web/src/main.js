@@ -27,5 +27,5 @@ const app = createApp(App)
   .use(ConfirmationService)
   .use(VueQueryPlugin, { queryClient })
 
-useSession(pinia).bindSessionLost(router)
+useSession(pinia).bindSessionLost(router, queryClient)
 app.mount('#app')

@@ -16,7 +16,7 @@ module Rules
         docs.each { |doc| engine.evaluate_document(doc) }
       else
         input = tc.input || {}
-        engine.evaluate_period({ "documents" => docs, "invalidations" => Array(input["invalidations"]), "events" => Array(input["events"]) }, stats: Audit::Stats.new(docs), fiscal_file: input["fiscal_file"])
+        engine.evaluate_period({ "documents" => docs, "invalidations" => Array(input["invalidations"]), "events" => Array(input["events"]) }, stats: Audit::Stats.new(docs), fiscal_file: sped_context(input["fiscal_file"]))
       end
       passed, details = compare(tc.expect, engine)
       tc.update!(last_result: passed ? "passed" : "failed", last_run_at: Time.current)
@@ -24,6 +24,13 @@ module Rules
     end
 
     private
+
+    # Paridade com Audit::SpedContext.build: o caso descreve só o essencial e o motor recebe a mesma forma do run real
+    def sped_context(file)
+      return nil if file.blank?
+      { "info" => { "errors" => [] }.merge(file["info"] || {}),
+        "c100" => Array(file["c100"]).map { |r| { "c170" => [], "c190" => [] }.merge(r) } }
+    end
 
     # input.document (um) ou input.documents (vários, para escopos cross_document/period/scenario)
     def build_documents(tc, catalog)

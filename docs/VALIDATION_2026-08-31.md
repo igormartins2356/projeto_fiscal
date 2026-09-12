@@ -2,6 +2,8 @@
 
 Fechamento da rodada "completar tabelas + validar regras e tabelas + processo de atualização".
 
+> Instantâneo daquela data; os números abaixo **não** são o estado atual. Catálogo de regras vigente: `docs/RULES.md` (regenerado do banco); estado das tabelas: `DATA_SOURCES.md` §2b.
+
 ## 1. Tabelas × fontes oficiais (amostras conferidas)
 
 22 verificações de valores conhecidos, todas OK (a única divergência inicial era expectativa errada do teste: medicamento na TIPI é alíquota 0%, não NT):
@@ -36,4 +38,4 @@ Ver `DATA_SOURCES.md` §3: sidekiq-cron (sync A-class → draft com diff; lembre
 1. `st_uf`: só SP×medicamentos — curadoria Sudeste (ou fornecedor de conteúdo).
 2. `icms_internal_rate`: alíquota geral das 27 UFs + NCMs específicos do Sudeste.
 3. `pis_cofins_special`: autopeças (Lei 10.485/02).
-4. TIPI/CEST: reimportação é manual (classe B) — planilha/página têm formato estável, importadores prontos.
+4. TIPI/CEST: reimportação é manual (classe B) pelo import genérico do painel — **não há importador dedicado** nem arquivo-fonte versionado no repositório (DATA_SOURCES §2b).

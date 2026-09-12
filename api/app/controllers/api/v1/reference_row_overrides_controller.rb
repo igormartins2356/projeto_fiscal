@@ -6,9 +6,7 @@ module Api
       before_action :set_override, only: %i[update destroy]
 
       def index
-        scope = Catalog::ReferenceRowOverride.includes(:reference_table, :created_by)
-                  .where(source_type: "firm", source_id: current_firm.id)
-                  .or(Catalog::ReferenceRowOverride.where(source_type: "client", source_id: firm_clients.select(:id)))
+        scope = own_scope.includes(:reference_table, :created_by)
         scope = scope.where(reference_table_id: params[:reference_table_id]) if params[:reference_table_id].present?
         render json: scope.order(created_at: :desc).map { |o| serialize(o) }
       end
@@ -16,14 +14,15 @@ module Api
       def create
         o = Catalog::ReferenceRowOverride.new(override_params.merge(created_by: current_user))
         return render json: { error: "cliente não pertence à firma" }, status: :unprocessable_entity unless own_source?(o)
-        return render json: { error: "chave com #{o.reference_table.key_arity} parte(s)" }, status: :unprocessable_entity if o.key.size != o.reference_table.key_arity
-        o.save!
+        return render json: { error: "tabela de referência inexistente" }, status: :unprocessable_entity if o.reference_table.nil?
+        o.save!   # aridade da chave e vigência sobreposta são validadas no model (valem também para o update)
         audit!("reference_row_override_created", subject: o, table: o.reference_table.code, key: o.key)
         render json: serialize(o), status: :created
       end
 
       def update
         @override.update!(override_params.except(:reference_table_id, :source_type, :source_id))
+        audit!("reference_row_override_updated", subject: @override, table: @override.reference_table.code, key: @override.key)
         render json: serialize(@override)
       end
 
@@ -35,9 +34,12 @@ module Api
 
       private
 
-      def set_override
-        @override = Catalog::ReferenceRowOverride.find(params[:id])
-        head :forbidden unless own_source?(@override)
+      # Recurso de outra firma responde 404 (403 confirmaria que o id existe).
+      def set_override = @override = own_scope.find(params[:id])
+
+      def own_scope
+        Catalog::ReferenceRowOverride.where(source_type: "firm", source_id: current_firm.id)
+          .or(Catalog::ReferenceRowOverride.where(source_type: "client", source_id: firm_clients.select(:id)))
       end
 
       def own_source?(o)

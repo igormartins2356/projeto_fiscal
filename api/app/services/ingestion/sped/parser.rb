@@ -4,6 +4,7 @@ module Ingestion
     # registros fora da spec são armazenados com campos posicionais (F01, F02…) e não travam o parse.
     class Parser
       class InvalidFile < StandardError; end
+      INSERT_BATCH = 2_000
 
       def self.call(content, client:, storage_ref:, uploaded_by: nil) = new(content, client, storage_ref, uploaded_by).call
 
@@ -18,16 +19,40 @@ module Ingestion
         lines = @raw.split(/\r?\n/).reject(&:blank?)
         raise InvalidFile, "arquivo não parece uma EFD (primeira linha não é |0000|...)" unless lines.first&.start_with?("|0000|")
         header = split(lines.first)
-        layout_date = parse_date(header_field(header, "DT_INI")) || Date.current
+        layout_date = parse_date(header_field(header, "DT_INI")) or raise InvalidFile, "registro 0000 sem DT_INI válido: não dá para escolher o leiaute vigente"
         @catalog = Catalog::Lookup.new(date: layout_date)
         raise InvalidFile, "tabela sped_layout sem versão publicada" unless @catalog.table_available?("sped_layout")
 
-        file = Ingestion::FiscalFile.create!(
+        hash = Digest::SHA256.hexdigest(@raw)
+        existing = Ingestion::FiscalFile.find_by(client_id: @client.id, file_hash: hash)
+        return existing if existing&.state == "done"
+        file = existing || create_file(header, hash)
+        file.records.delete_all if existing   # reprocessamento de um arquivo que ficou em parsing/failed
+        file.update!(state: "parsing", errors_log: [], summary: {})
+        parse_into(file, lines, header)
+      rescue InvalidFile
+        raise
+      rescue StandardError => e
+        # sem isto o arquivo fica preso em "parsing" e o Sidekiq retenta 25× a mesma falha
+        Rails.logger.error("Sped::Parser #{@storage_ref}: #{e.class}: #{e.message}")
+        file&.update_columns(state: "failed", errors_log: [{ "line" => 0, "error" => "#{e.class}: #{e.message}" }])
+        file || raise
+      end
+
+      private
+
+      def create_file(header, hash)
+        Ingestion::FiscalFile.create!(
           firm_id: @client.firm_id, client: @client, kind: "sped_icms_ipi", storage_ref: @storage_ref, uploaded_by: @uploaded_by,
           layout_version: header_field(header, "COD_VER"), purpose: header_field(header, "COD_FIN") == "1" ? "rectifying" : "original",
           period_start: parse_date(header_field(header, "DT_INI")), period_end: parse_date(header_field(header, "DT_FIN")),
-          file_hash: Digest::SHA256.hexdigest(@raw), state: "parsing"
+          file_hash: hash, state: "parsing"
         )
+      rescue ActiveRecord::RecordNotUnique   # corrida entre dois uploads do mesmo arquivo
+        Ingestion::FiscalFile.find_by!(client_id: @client.id, file_hash: hash)
+      end
+
+      def parse_into(file, lines, header)
         errors = []
         errors << { line: 1, error: "CNPJ do arquivo (#{header_field(header, 'CNPJ')}) difere do cliente (#{@client.cnpj})" } if header_field(header, "CNPJ").present? && header_field(header, "CNPJ") != @client.cnpj
 
@@ -49,16 +74,11 @@ module Ingestion
         end
 
         persist(file, rows)
-        docs = Ingestion::Document.where(client_id: @client.id, kind: %w[nfe nfce]).where(access_key: rows.filter_map { |r| r[:document_access_key] }).pluck(:access_key, :id).to_h
-        Ingestion::FiscalRecord.where(fiscal_file_id: file.id).where.not(document_access_key: nil).find_each do |r|
-          r.update_columns(document_id: docs[r.document_access_key]) if docs[r.document_access_key]
-        end
+        linked = link_documents(file)
         file.update!(state: "done", records_count: rows.size, errors_log: errors.first(200),
-                     summary: { "records" => counts, "c100" => counts["C100"], "linked_documents" => docs.size })
+                     summary: { "records" => counts, "c100" => counts["C100"], "linked_documents" => linked })
         file
       end
-
-      private
 
       def split(line) = line.strip.sub(/\A\|/, "").sub(/\|\z/, "").split("|", -1)
 
@@ -82,18 +102,45 @@ module Ingestion
       end
 
       # Hierarquia oficial por nível (Guia Prático): o pai é o último registro de nível imediatamente inferior.
+      # Uma EFD real tem 10^5–10^6 linhas: grava em blocos e resolve o parent_id num segundo passo por line_number.
       def persist(file, rows)
         stack = {}
+        parent_line = {}
         rows.each do |r|
           level = r[:level] || 1
-          parent_id = level > 1 ? stack[level - 1] : nil
-          rec = Ingestion::FiscalRecord.new(fiscal_file_id: file.id, record_type: r[:record_type], block: r[:block], line_number: r[:line_number],
-                                            fields: r[:fields], parent_id:, document_access_key: r[:document_access_key],
-                                            item_number: r[:fields]["NUM_ITEM"]&.to_i)
-          rec.save!(validate: false)
-          stack[level] = rec.id
+          parent_line[r[:line_number]] = stack[level - 1] if level > 1 && stack[level - 1]
+          stack[level] = r[:line_number]
           stack.keys.select { |l| l > level }.each { |l| stack.delete(l) }
         end
+        rows.each_slice(INSERT_BATCH) do |slice|
+          Ingestion::FiscalRecord.insert_all!(slice.map do |r|
+            { fiscal_file_id: file.id, record_type: r[:record_type], block: r[:block], line_number: r[:line_number],
+              fields: r[:fields], document_access_key: r[:document_access_key], item_number: r[:fields]["NUM_ITEM"]&.to_i }
+          end)
+        end
+        link_parents(file, parent_line)
+      end
+
+      def link_parents(file, parent_line)
+        ids = Ingestion::FiscalRecord.where(fiscal_file_id: file.id).pluck(:line_number, :id).to_h
+        pairs = parent_line.filter_map { |line, parent| [ids[line], ids[parent]] if ids[line] && ids[parent] }
+        pairs.each_slice(INSERT_BATCH) do |slice|
+          values = slice.map { |id, parent_id| "(#{id.to_i}, #{parent_id.to_i})" }.join(", ")
+          Ingestion::FiscalRecord.connection.update(<<~SQL.squish)
+            UPDATE fiscal_records SET parent_id = v.parent_id
+            FROM (VALUES #{values}) AS v(id, parent_id) WHERE fiscal_records.id = v.id
+          SQL
+        end
+      end
+
+      # Vínculo registro → documento em um único UPDATE (a EFD traz um C100 por nota)
+      def link_documents(file)
+        Ingestion::FiscalRecord.connection.update(<<~SQL.squish)
+          UPDATE fiscal_records SET document_id = d.id FROM documents d
+          WHERE fiscal_records.fiscal_file_id = #{file.id.to_i} AND fiscal_records.document_access_key IS NOT NULL
+            AND d.client_id = #{@client.id.to_i} AND d.kind IN ('nfe', 'nfce') AND d.access_key = fiscal_records.document_access_key
+        SQL
+        Ingestion::FiscalRecord.where(fiscal_file_id: file.id).where.not(document_id: nil).distinct.count(:document_id)
       end
     end
   end

@@ -11,7 +11,7 @@ module Rules
       def call
         file = @ctx["fiscal_file"] or return []
         docs = (@ctx.dig("period", "documents") || []).to_h { |d| [d["access_key"], d] }
-        tol = BigDecimal(@params["tolerance"].to_s)
+        tol = dec(@params["tolerance"])
         hits = []
         (file["c100"] || []).each do |r|
           doc = docs[r["access_key"]] or next
@@ -29,7 +29,7 @@ module Rules
               fv, iv = k.dig("fields", file_field), Dsl::Path.fetch(item, item_path)
               next if fv.blank? || Dsl::Path.absent?(iv) || iv.nil?
               equal = if fv.match?(/\A-?\d+(\.\d+)?\z/) && iv.to_s.match?(/\A-?\d+(\.\d+)?\z/)
-                        (BigDecimal(fv) - BigDecimal(iv.to_s)).abs <= tol
+                        (dec(fv) - dec(iv)).abs <= tol
                       else
                         fv.to_s == iv.to_s
                       end

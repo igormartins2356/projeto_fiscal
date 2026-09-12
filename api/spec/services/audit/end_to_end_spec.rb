@@ -24,7 +24,10 @@ RSpec.describe "upload → parse → audit → findings" do
     Audit::Runner.new(run).call
     run.reload
     expect(run.state).to eq("done")
-    expect(run.evaluation_errors.reject { |e| e["error"].include?("sem versão publicada") }).to eq([])
+    # tolerância nominal: só estas tabelas ainda não têm versão publicada no seed (regra vira evaluation_error, não finding)
+    missing_tables = run.evaluation_errors.filter_map { |e| e["error"][/tabela '([a-z_]+)' sem versão publicada/, 1] }
+    expect(missing_tables).to match_array(%w[ibs_cbs_class tipi pis_cofins_special])
+    expect(run.evaluation_errors.size).to eq(missing_tables.size)
     codes = run.findings.pluck(:rule_code)
     expect(codes).to include("DOC.RETURN.ORIGINAL_MISSING")   # devolução da própria venda, original não enviada
     expect(codes).not_to include("ICMS.CSOSN.SALE_RETURN", "ICMS.REGIME.SITUATION_FIELD", "DOC.TOTALS.ITEMS_SUM", "CFOP.SCOPE.MATCH", "IBSCBS.GROUP.REQUIRED", "IBSCBS.CBS.RATE_SCHEDULE", "DOC.RETURN.REFERENCE", "DOC.RETURN.MIRROR")
@@ -32,6 +35,20 @@ RSpec.describe "upload → parse → audit → findings" do
     expect(f.severity).to eq("warning")
     expect(f.evidence).to include("referenced_access_key" => "35260312345678000190550010000009991000009999")
     expect(run.snapshot["rule_ids"]).to be_present
+    expect(run.snapshot["reference_version_ids"]).to include("icms_internal_rate", "icms_interstate_rate")
+    expect(Catalog::ReferenceVersion.where(id: run.snapshot["reference_version_ids"].values).pluck(:state).uniq).to eq(["published"])
+  end
+
+  it "não avalia regra de item nem de documento em nota cancelada" do
+    doc = Ingestion::DocumentImporter.new(client:).call(nfe_fixture("sale_return_csosn_102")).document
+    data = doc.data.deep_dup
+    data["status"] = (data["status"] || {}).merge("state" => "cancelled")
+    doc.update!(status_state: "cancelled", data:)
+
+    run = client.audit_runs.create!(firm_id: client.firm_id, period_start: Date.new(2026, 3, 1), period_end: Date.new(2026, 3, 31))
+    Audit::Runner.new(run).call
+    scopes = run.reload.findings.where(document_id: doc.id).distinct.pluck(:scope)
+    expect(scopes).not_to include("item", "document")
   end
 
   it "keeps the finding state across runs (dedupe_key) and honours client overrides" do

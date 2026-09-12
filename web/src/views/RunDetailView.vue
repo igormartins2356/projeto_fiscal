@@ -13,12 +13,12 @@ import Column from 'primevue/column'
 import SeverityTag from '../components/SeverityTag.vue'
 import { auditRuns, findings, downloadAuditReport, errorMessage } from '../api/client'
 import { exportCsv, exportXlsx } from '../utils/export'
+import { FINDING_SEVERITIES, FINDING_STATES } from '../constants/findings'
+import { fmtDateTime } from '../utils/date'
+import { debounce } from '../utils/debounce'
 
-export const FINDING_STATES = [
-  { value: 'open', label: 'aberto' }, { value: 'justified', label: 'justificado' }, { value: 'false_positive', label: 'falso positivo' },
-  { value: 'fixed', label: 'corrigido' }, { value: 'ignored', label: 'ignorado' },
-]
-const SEVERITIES = [{ value: 'error', label: 'erro' }, { value: 'warning', label: 'alerta' }, { value: 'info', label: 'info' }]
+// Marcar como justificado/falso positivo/ignorado exige justificativa (Audit::Finding::STATES_REQUIRING_NOTE → 422).
+const STATES_REQUIRING_NOTE = ['justified', 'false_positive', 'ignored']
 const EXPORT_COLUMNS = [
   { field: 'rule_code', header: 'Regra' }, { field: 'severity', header: 'Severidade' }, { field: 'state', header: 'Situação' },
   { field: 'document', header: 'Documento', value: f => (f.document ? `${f.document.number}/${f.document.series}` : '') },
@@ -44,10 +44,10 @@ export default {
   data() {
     return {
       pdfBusy: false,
-      rows: [], total: 0, loading: false,
+      rows: [], total: 0, loading: false, reqId: 0, debouncedSearch: null,
       lazy: { page: 1, per_page: 25, sort_field: 'rule_code', sort_order: 1, filters: { rule_code: null, severity: null, state: null, q: '' } },
       expanded: {},
-      states: FINDING_STATES, severities: SEVERITIES,
+      states: FINDING_STATES, severities: FINDING_SEVERITIES, requiresNote: STATES_REQUIRING_NOTE,
       dialog: { visible: false, finding: null, state: null, note: '' },
     }
   },
@@ -59,21 +59,28 @@ export default {
     },
     done() { return this.run.data?.state === 'done' },
     first() { return (this.lazy.page - 1) * this.lazy.per_page },
+    noteRequired() { return this.requiresNote.includes(this.dialog.state) },
   },
+  created() { this.debouncedSearch = debounce(() => { this.lazy.page = 1; this.load() }, 300) },
+  beforeUnmount() { this.debouncedSearch?.cancel() },
   watch: {
     done: { immediate: true, handler(v) { if (v) this.load() } },
-    'lazy.filters': { deep: true, handler() { this.lazy.page = 1; this.load() } },
+    // Debounce nos filtros: digitar na busca por mensagem gerava uma requisição por tecla.
+    'lazy.filters': { deep: true, handler() { this.debouncedSearch() } },
   },
   methods: {
     async load() {
       if (!this.done) return
       this.loading = true
+      const seq = ++this.reqId
       const { filters, ...rest } = this.lazy
       const params = { ...rest, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== null && v !== '')) }
       try {
         const res = await this.queryClient.fetchQuery({ queryKey: ['findings', this.id, params], queryFn: () => auditRuns.findings(this.id, params), staleTime: 0 })
+        // Filtro digitado rápido: só a última requisição pode escrever na tabela (a anterior pode chegar depois).
+        if (seq !== this.reqId) return
         this.rows = res.data; this.total = res.total
-      } finally { this.loading = false }
+      } finally { if (seq === this.reqId) this.loading = false }
     },
     onPage(e) { this.lazy.page = e.page + 1; this.lazy.per_page = e.rows; this.load() },
     onSort(e) { this.lazy.sort_field = e.sortField; this.lazy.sort_order = e.sortOrder; this.load() },
@@ -82,7 +89,9 @@ export default {
       this.dialog = { visible: true, finding: f, state, note: f.state_note ?? '' }
     },
     async confirmDialog() {
-      await this.saveState(this.dialog.finding, this.dialog.state, this.dialog.note)
+      // A API responde 422 sem justificativa nestes estados; barramos antes de enviar.
+      if (this.noteRequired && !this.dialog.note.trim()) return this.$toast.add({ severity: 'warn', summary: 'Justificativa obrigatória', detail: 'Descreva o porquê da mudança de situação.', life: 4000 })
+      await this.saveState(this.dialog.finding, this.dialog.state, this.dialog.note.trim())
       this.dialog.visible = false
     },
     async saveState(f, state, note) {
@@ -91,7 +100,7 @@ export default {
         await this.load()
         this.$toast.add({ severity: 'success', summary: 'Situação atualizada', detail: `${f.rule_code} → ${this.states.find(s => s.value === state)?.label}`, life: 2500 })
       } catch (e) {
-        this.$toast.add({ severity: 'error', summary: 'Falha ao atualizar', detail: e.message, life: 4000 })
+        this.$toast.add({ severity: 'error', summary: 'Falha ao atualizar', detail: errorMessage(e), life: 4000 })
       }
     },
     async allRows() {
@@ -113,6 +122,7 @@ export default {
       try { await downloadAuditReport(this.id) } catch (e) { this.$toast.add({ severity: 'error', summary: 'Falha ao gerar PDF', detail: errorMessage(e), life: 4000 }) } finally { this.pdfBusy = false }
     },
     stateLabel(v) { return this.states.find(s => s.value === v)?.label ?? v },
+    fmtDateTime,
   },
 }
 </script>
@@ -153,7 +163,7 @@ export default {
         <template #body="{ data }"><template v-if="data.document">NF {{ data.document.number }}/{{ data.document.series }}<span v-if="data.item_number" class="text-slate-500"> · item {{ data.item_number }}</span><div class="text-xs text-slate-500">{{ data.document.nature }}</div></template></template>
       </Column>
       <Column field="message" header="Mensagem" :showFilterMenu="false">
-        <template #filter><InputText v-model.lazy="lazy.filters.q" placeholder="Buscar na mensagem" class="text-xs" /></template>
+        <template #filter><InputText v-model="lazy.filters.q" placeholder="Buscar na mensagem" aria-label="Buscar na mensagem" class="text-xs" /></template>
       </Column>
       <Column field="state" header="Situação" sortable :showFilterMenu="false" class="w-44">
         <template #body="{ data }">
@@ -170,7 +180,7 @@ export default {
           <div class="space-y-1 text-xs">
             <h4 class="uppercase text-slate-500 mb-1">Documento</h4>
             <div v-if="data.document"><span class="text-slate-500">Chave:</span> <span class="font-mono">{{ data.document.access_key }}</span></div>
-            <div v-if="data.document"><span class="text-slate-500">Emissão:</span> {{ new Date(data.document.issued_at).toLocaleString('pt-BR') }}</div>
+            <div v-if="data.document"><span class="text-slate-500">Emissão:</span> {{ fmtDateTime(data.document.issued_at) }}</div>
             <div><span class="text-slate-500">Origem da regra:</span> {{ data.rule_source }}</div>
             <div v-if="data.state_note"><span class="text-slate-500">Justificativa:</span> {{ data.state_note }}</div>
           </div>
@@ -182,11 +192,12 @@ export default {
 
     <Dialog v-model:visible="dialog.visible" modal :header="`Marcar como ${stateLabel(dialog.state)}`">
       <p class="text-slate-600 mb-3">{{ dialog.finding?.message }}</p>
-      <label class="block text-xs text-slate-500 mb-1">Justificativa (fica registrada e é reaproveitada nas próximas auditorias)</label>
-      <Textarea v-model="dialog.note" rows="3" />
+      <label class="block text-xs text-slate-500 mb-1" for="finding-note">Justificativa{{ noteRequired ? ' (obrigatória)' : '' }} — fica registrada e é reaproveitada nas próximas auditorias</label>
+      <Textarea id="finding-note" v-model="dialog.note" rows="3" />
+      <span v-if="noteRequired && !dialog.note.trim()" class="field-error">Informe a justificativa para registrar esta situação.</span>
       <template #footer>
         <Button label="Cancelar" severity="secondary" @click="dialog.visible = false" />
-        <Button label="Confirmar" :loading="update.isPending" @click="confirmDialog" />
+        <Button label="Confirmar" :loading="update.isPending" :disabled="noteRequired && !dialog.note.trim()" @click="confirmDialog" />
       </template>
     </Dialog>
   </div>

@@ -1,4 +1,8 @@
 # Cliente de teste do cross-check SPED: IRMAOS DZENKAUSKAS LTDA (Victor Dzenk) — confecção, Lagoa Santa/MG, não optante do Simples.
+# Cliente de teste só existe em development/test (em produção os clientes vêm do cadastro da firma).
+# A base foi zerada em 10/09/2026 para o cadastro de clientes reais: estes dois só voltam sob pedido
+# explícito (SEED_TEST_CLIENTS=1), para um `db:seed` não recriá-los junto com o catálogo e as regras.
+return unless (Rails.env.development? || Rails.env.test?) && ENV["SEED_TEST_CLIENTS"] == "1"
 firm = Accounts::Firm.find_by!(name: "Escritório Piloto")
 client = Accounts::Client.find_or_create_by!(firm:, cnpj: "66412974000190") do |c|
   c.legal_name = "IRMAOS DZENKAUSKAS LTDA"

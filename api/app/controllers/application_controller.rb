@@ -17,7 +17,9 @@ class ApplicationController < ActionController::API
     return @current_user if defined?(@current_user)
     @current_user = authenticate_with_http_token do |token, _|
       payload = Auth::Tokens.decode(token, purpose: "access")
-      Accounts::User.active.find_by(id: payload["sub"])
+      user = Accounts::User.active.find_by(id: payload["sub"])
+      # Token emitido antes da última troca de senha não vale mais (reset por administrador de conta comprometida).
+      user if user && payload["pwd"].to_i == Auth::Tokens.password_stamp(user)
     rescue Auth::Tokens::Invalid
       nil
     end

@@ -1,28 +1,39 @@
 # Casos de teste por regra: ≥1 que dispara e ≥1 que não dispara (DSL_RULES.md §10). Documentos canônicos via RuleCaseBuilder.
 require Rails.root.join("lib/rule_case_builder")
-B = RuleCaseBuilder
+# unless defined?: a seed é recarregada várias vezes na mesma sessão (specs, load_seed) e reatribuir constante avisa
+B = RuleCaseBuilder unless defined?(B)
 
-SIMPLES = { "tax_regime" => "simples_nacional", "uf" => "SP", "icms_taxpayer" => true, "ipi_taxpayer" => false, "activity" => ["commerce"], "uses_nfce" => false, "sells_to_final_consumer" => false, "exports" => false, "st" => { "source" => "catalog", "applies" => false, "overrides" => [] }, "pis_cofins" => { "regime" => "simples" } }
-PRESUMIDO = SIMPLES.merge("tax_regime" => "lucro_presumido", "pis_cofins" => { "regime" => "cumulative" })
-REAL = SIMPLES.merge("tax_regime" => "lucro_real", "pis_cofins" => { "regime" => "non_cumulative" })
+SIMPLES = { "tax_regime" => "simples_nacional", "uf" => "SP", "icms_taxpayer" => true, "ipi_taxpayer" => false, "activity" => ["commerce"], "uses_nfce" => false, "sells_to_final_consumer" => false, "exports" => false, "st" => { "source" => "catalog", "applies" => false, "overrides" => [] }, "pis_cofins" => { "regime" => "simples" } } unless defined?(SIMPLES)
+PRESUMIDO = SIMPLES.merge("tax_regime" => "lucro_presumido", "pis_cofins" => { "regime" => "cumulative" }) unless defined?(PRESUMIDO)
+REAL = SIMPLES.merge("tax_regime" => "lucro_real", "pis_cofins" => { "regime" => "non_cumulative" }) unless defined?(REAL)
+MEI = SIMPLES.merge("tax_regime" => "mei") unless defined?(MEI)
+EXCESSO = SIMPLES.merge("tax_regime" => "simples_nacional_excess") unless defined?(EXCESSO)
 
 # document pode ser um Hash (um documento) ou um Array de Hashes (período com vários documentos); events/invalidations opcionais via Hash { documents:, events:, invalidations: }
+def case_input(document)
+  base = { "kind" => "canonical", "monitored_cnpj" => "12345678000190" }
+  if document.is_a?(Array) then base.merge("documents" => document)
+  elsif document.is_a?(Hash) && document.key?("documents") then base.merge(document)
+  else base.merge("document" => document)
+  end
+end
+
 def cases!(code, fire:, pass:, date: "2026-03-14", scenario: SIMPLES, catalog: {}, findings: nil, version: nil)
   rule = (version ? Rules::Rule.find_by(code:, version:) : Rules::Rule.where(code:).order(version: :desc).first) or (puts "  ! regra #{code} não existe"; return)
   return if rule.test_cases.exists?
-  build_input = ->(document) do
-    base = { "kind" => "canonical", "monitored_cnpj" => "12345678000190" }
-    if document.is_a?(Array) then base.merge("documents" => document)
-    elsif document.is_a?(Hash) && document.key?("documents") then base.merge(document)
-    else base.merge("document" => document)
-    end
-  end
   fire.each do |(name, document, sc)|
-    rule.test_cases.create!(name: "dispara: #{name}", reference_date: date, scenario: sc || scenario, catalog:, input: build_input.(document), expect: { "findings" => findings || [{ "severity" => rule.severity }] })
+    rule.test_cases.create!(name: "dispara: #{name}", reference_date: date, scenario: sc || scenario, catalog:, input: case_input(document), expect: { "findings" => findings || [{ "severity" => rule.severity }] })
   end
   pass.each do |(name, document, sc)|
-    rule.test_cases.create!(name: "não dispara: #{name}", reference_date: date, scenario: sc || scenario, catalog:, input: build_input.(document), expect: { "findings" => [] })
+    rule.test_cases.create!(name: "não dispara: #{name}", reference_date: date, scenario: sc || scenario, catalog:, input: case_input(document), expect: { "findings" => [] })
   end
+end
+
+# Caso avulso para regra que já tem o par (idempotente pelo nome): curadoria nova entra sem recriar os casos existentes.
+def case!(code, name, document, date: "2026-03-14", scenario: SIMPLES, catalog: {}, findings: [], version: nil)
+  rule = (version ? Rules::Rule.find_by(code:, version:) : Rules::Rule.where(code:).order(version: :desc).first) or (puts "  ! regra #{code} não existe"; return)
+  return if rule.test_cases.exists?(name:)
+  rule.test_cases.create!(name:, reference_date: date, scenario:, catalog:, input: case_input(document), expect: { "findings" => findings })
 end
 def key_for(n) = "35260312345678000190550010000#{n.to_s.rjust(6, '0')}1000#{n.to_s.rjust(6, '0')}"
 def numbered(n, over = {}) = B.doc(doc: B.deep_merge({ "issuance" => { "number" => n }, "access_key" => key_for(n) }, over.deep_stringify_keys))
@@ -31,18 +42,42 @@ ret_doc = ->(csosn) { B.doc(item: { product: { cfop: "1202" }, icms: { group: "I
 nfce = ->(over = {}) { B.doc(doc: B.deep_merge({ "model" => "65", "operation" => { "final_consumer" => true }, "recipient" => { "cnpj" => nil, "ie" => nil, "ie_indicator" => nil, "person_type" => "unidentified" } }, over.deep_stringify_keys)) }
 
 # ---- regras originais (03/04)
-cases!("ICMS.REGIME.SITUATION_FIELD", fire: [["Simples com CST", B.doc(normal: true, doc: { issuer: { crt: "1" } })], ["Presumido com CSOSN", B.doc, PRESUMIDO]], pass: [["Simples com CSOSN", B.doc], ["Presumido com CST", B.doc(normal: true), PRESUMIDO]])
-cases!("ICMS.CRT.SCENARIO", fire: [["CRT 3 em cenário Simples", B.doc(normal: true)]], pass: [["CRT 1 em Simples", B.doc], ["CRT 3 em Presumido", B.doc(normal: true), PRESUMIDO]])
+cases!("ICMS.REGIME.SITUATION_FIELD",
+       fire: [["Simples com CST", B.doc(normal: true, doc: { issuer: { crt: "1" } })], ["Presumido com CSOSN", B.doc, PRESUMIDO],
+              ["MEI com CST", B.doc(normal: true, doc: { issuer: { crt: "4" } }), MEI],
+              ["excesso de sublimite com CSOSN (ICMS fora do Simples)", B.doc(doc: { issuer: { crt: "2" } }), EXCESSO]],
+       pass: [["Simples com CSOSN", B.doc], ["Presumido com CST", B.doc(normal: true), PRESUMIDO],
+              ["MEI com CSOSN", B.doc(doc: { issuer: { crt: "4" } }), MEI],
+              ["excesso de sublimite com CST", B.doc(normal: true, doc: { issuer: { crt: "2" } }), EXCESSO]])
+cases!("ICMS.CRT.SCENARIO",
+       fire: [["CRT 3 em cenário Simples", B.doc(normal: true)], ["CRT 1 em cenário MEI", B.doc, MEI], ["CRT 3 em cenário de excesso de sublimite", B.doc(normal: true, doc: { issuer: { crt: "3" } }), EXCESSO]],
+       pass: [["CRT 1 em Simples", B.doc], ["CRT 3 em Presumido", B.doc(normal: true), PRESUMIDO],
+              ["CRT 4 em cenário MEI", B.doc(doc: { issuer: { crt: "4" } }), MEI],
+              ["CRT 2 em cenário de excesso de sublimite", B.doc(normal: true, doc: { issuer: { crt: "2" } }), EXCESSO],
+              ["CRT 1 em cenário de excesso (ERP ainda não atualizado)", B.doc(doc: { issuer: { crt: "1" } }), EXCESSO]])
 cases!("CFOP.SCOPE.MATCH", fire: [["CFOP 6102 com idDest interna", B.doc(item: { product: { cfop: "6102" } })]], pass: [["5102 interna", B.doc], ["6102 interestadual", B.doc(item: { product: { cfop: "6102" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "MG", address: { uf: "MG" } } })]])
-cases!("CFOP.KNOWN", fire: [["CFOP inexistente 5999", B.doc(item: { product: { cfop: "5999" } })]], pass: [["5102", B.doc]])
-cases!("DOC.RETURN.REFERENCE", fire: [["devolução sem NFref", B.doc(item: { product: { cfop: "1202" } }, doc: { issuance: { purpose: "return" }, operation: { direction_declared: "inbound" } })]], pass: [["devolução com NFref", ret_doc.("900")]])
+cases!("CFOP.KNOWN", fire: [["CFOP inexistente 5999", B.doc(item: { product: { cfop: "5999" } })]],
+       findings: [{ "item_number" => 1, "severity" => "warning", "evidence" => { "item.cfop_known" => "false" }, "message_includes" => "5999" }],
+       pass: [["5102", B.doc], ["5551 — venda de bem do ativo imobilizado", B.doc(item: { product: { cfop: "5551" } })], ["1556 — compra de material de uso e consumo", B.doc(item: { product: { cfop: "1556" } }, doc: { operation: { direction_declared: "inbound" } })]])
+cases!("DOC.RETURN.REFERENCE", fire: [["devolução sem NFref", B.doc(item: { product: { cfop: "1202" } }, doc: { issuance: { purpose: "return" }, operation: { direction_declared: "inbound" } })]],
+       pass: [["devolução com NFref", ret_doc.("900")],
+              ["devolução referenciando nota modelo 1 (refNF)", B.doc(item: { product: { cfop: "1202" } }, doc: { issuance: { purpose: "return" }, operation: { direction_declared: "inbound" }, references: [{ kind: "nf_model_1", nf_model_1: { uf: "35", yymm: "2602", cnpj: "99887766000155", model: "01", series: "1", number: 999 } }] })]])
 cases!("DOC.TOTALS.ITEMS_SUM", fire: [["vProd ≠ soma", B.doc(doc: { totals: { products: "999.00" } })]], pass: [["totais batem", B.doc]])
 cases!("ICMS.AMOUNT.CALC", fire: [["vICMS errado", B.doc(normal: true, item: { icms: { amount: "170.00" } })]], pass: [["vICMS correto", B.doc(normal: true)]], scenario: PRESUMIDO)
-cases!("ICMS.RATE.INTERSTATE", fire: [["SP→BA com 12%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "BA", address: { uf: "BA" } } })]],
-       pass: [["SP→BA com 7%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "7.00", amount: "70.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "BA", address: { uf: "BA" } } })], ["SP→RJ com 12%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]], scenario: PRESUMIDO)
-cases!("IBSCBS.GROUP.REQUIRED", fire: [["sem grupo IBS/CBS", B.doc(item: { ibs_cbs: { present: false } })]], pass: [["com grupo", B.doc]])
-cases!("IBSCBS.CBS.RATE_SCHEDULE", fire: [["CBS 1,5% em 2026", B.doc(item: { ibs_cbs: { cbs: { rate: "1.50", effective_rate: "1.50", amount: "15.00" } } })]], pass: [["CBS 0,9%", B.doc]])
-cases!("PISCOFINS.CST.REGIME", fire: [["Simples com CST 01", B.doc(item: { pis: { cst: "01" } })], ["Presumido com CST 49", B.doc(normal: true, item: { pis: { cst: "49" } }), PRESUMIDO]], pass: [["Simples 49", B.doc], ["Presumido 01", B.doc(normal: true), PRESUMIDO], ["Real monofásico 04", B.doc(normal: true, item: { pis: { cst: "04" } }), REAL]])
+cases!("ICMS.RATE.INTERSTATE", fire: [["SP→BA com 12%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "BA", address: { uf: "BA" } } })],
+              ["origem 1 (importada) SP→RJ com 12% (Res. 13/2012 fixa 4%)", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "1", rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]],
+       pass: [["SP→BA com 7%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "7.00", amount: "70.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "BA", address: { uf: "BA" } } })], ["SP→RJ com 12%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })],
+              ["origem 1 (importada) SP→RJ com 4%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "1", rate: "4.00", amount: "40.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })],
+              ["origem 6 (sem similar nacional) SP→RJ com 12% — fora da Res. 13", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "6", rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]], scenario: PRESUMIDO)
+cases!("IBSCBS.GROUP.REQUIRED", fire: [["sem grupo IBS/CBS", B.doc(item: { ibs_cbs: { present: false } })]], pass: [["com grupo", B.doc]], date: "2026-08-15")
+cases!("IBSCBS.CBS.RATE_SCHEDULE", version: 1, fire: [["CBS 1,5% em 2026", B.doc(item: { ibs_cbs: { cbs: { rate: "1.50", effective_rate: "1.50", amount: "15.00" } } })]], pass: [["CBS 0,9%", B.doc]])
+doc2027 = ->(rate) { B.doc(doc: { issuance: { issued_at: "2027-03-14T10:22:00-03:00" } }, item: { ibs_cbs: { cbs: { rate:, effective_rate: rate, amount: "9.00" }, ibs_uf: { rate: "0.05", effective_rate: "0.05", amount: "0.50" } } }) }
+cases!("IBSCBS.CBS.RATE_SCHEDULE", version: 2, date: "2027-03-14",
+       fire: [["CBS 0,9% em 2027 (cronograma estimado)", doc2027.("0.90")]], pass: [["CBS igual à estimativa do cronograma", doc2027.("9.21")]])
+cases!("PISCOFINS.CST.REGIME", fire: [["Simples com CST 01", B.doc(item: { pis: { cst: "01" } })], ["Presumido com CST 49 em venda (5102)", B.doc(normal: true, item: { pis: { cst: "49" } }), PRESUMIDO]],
+       pass: [["Simples 49", B.doc], ["Presumido 01", B.doc(normal: true), PRESUMIDO], ["Real monofásico 04", B.doc(normal: true, item: { pis: { cst: "04" } }), REAL],
+              ["Presumido com CST 49 em remessa (5915) — saída sem receita", B.doc(normal: true, item: { product: { cfop: "5915" }, pis: { cst: "49", base_amount: "0.00", rate: "0.00", amount: "0.00" }, cofins: { cst: "49", base_amount: "0.00", rate: "0.00", amount: "0.00" } }), PRESUMIDO],
+              ["Presumido com CST 49 em bonificação (5910)", B.doc(normal: true, item: { product: { cfop: "5910" }, pis: { cst: "49", base_amount: "0.00", rate: "0.00", amount: "0.00" }, cofins: { cst: "49", base_amount: "0.00", rate: "0.00", amount: "0.00" } }), PRESUMIDO]])
 cases!("PISCOFINS.RATE.REGIME", fire: [["Presumido com 1,65/7,6", B.doc(normal: true, item: { pis: { rate: "1.65", amount: "16.50" }, cofins: { rate: "7.60", amount: "76.00" } })]], pass: [["Presumido 0,65/3", B.doc(normal: true)], ["Real 1,65/7,6", B.doc(normal: true, item: { pis: { rate: "1.65", amount: "16.50" }, cofins: { rate: "7.60", amount: "76.00" } }), REAL]], scenario: PRESUMIDO)
 cases!("IPI.NON_TAXPAYER.HIGHLIGHT", fire: [["comércio destacando IPI", B.doc(normal: true, item: { ipi: { cst: "50", taxed: true, base_amount: "1000.00", rate: "5.00", amount: "50.00" } })]], pass: [["sem IPI", B.doc(normal: true)]], scenario: PRESUMIDO)
 cases!("ICMS.SIMPLES.NO_HIGHLIGHT", fire: [["CSOSN 102 com vICMS", B.doc(item: { icms: { amount: "50.00" } })]], pass: [["CSOSN 102 sem valor", B.doc]])
@@ -51,7 +86,11 @@ cases!("DIFAL.REQUIRED", fire: [["interestadual a PF sem ICMSUFDest", B.doc(norm
        pass: [["com ICMSUFDest", B.doc(normal: true, item: { product: { cfop: "6108" }, icms: { rate: "12.00", amount: "120.00" }, icms_uf_dest: { base_amount: "1000.00", destination_internal_rate: "20.00", interstate_rate: "12.00", destination_amount: "80.00" } }, doc: { operation: { scope: "interstate", final_consumer: true }, recipient: { cnpj: nil, cpf: "12345678909", ie: nil, ie_indicator: "non_taxpayer", uf: "RJ", address: { uf: "RJ" } } })]], scenario: PRESUMIDO)
 cases!("NFCE.CFOP.INTRASTATE", fire: [["NFC-e com 6102", nfce.(operation: { scope: "interstate" }).tap { |d| d["items"][0]["product"]["cfop"] = "6102" }]], pass: [["NFC-e 5102", nfce.()]])
 cases!("NFCE.RECIPIENT.NON_TAXPAYER", fire: [["NFC-e para contribuinte", nfce.(recipient: { cnpj: "99887766000155", ie_indicator: "taxpayer" })]], pass: [["NFC-e sem destinatário", nfce.()]])
-cases!("CFOP.RETURN.PURPOSE", fire: [["CFOP 1202 com finNFe normal", B.doc(item: { product: { cfop: "1202" } }, doc: { operation: { direction_declared: "inbound" } })]], pass: [["5102 normal", B.doc], ["1202 devolução", ret_doc.("900")]])
+cases!("CFOP.RETURN.PURPOSE",
+       fire: [["CFOP 1202 com finNFe normal", B.doc(item: { product: { cfop: "1202" } }, doc: { operation: { direction_declared: "inbound" } })],
+              ["finNFe 4 com CFOP de venda 5102", B.doc(doc: { issuance: { purpose: "return" }, references: [{ kind: "nfe", access_key: "35260299887766000155550010000009991000009999" }] })]],
+       pass: [["5102 normal", B.doc], ["1202 devolução", ret_doc.("900")],
+              ["finNFe 2 (complementar) com CFOP de venda", B.doc(doc: { issuance: { purpose: "complementary" }, references: [{ kind: "nfe", access_key: "35260299887766000155550010000009991000009999" }] })]])
 cases!("NCM.VALID", fire: [["NCM inexistente", B.doc(item: { product: { ncm: "99999999" } })]], pass: [["NCM existente", B.doc]], catalog: { "ncm" => [{ "key" => ["84713012"], "data" => { "description" => "x" } }] })
 cases!("CEST.REQUIRED", fire: [["NCM com CEST esperado e sem CEST", B.doc(item: { product: { ncm: "22021000" } })]], pass: [["com CEST", B.doc(item: { product: { ncm: "22021000", cest: "0300700" } })], ["NCM sem ST", B.doc]], catalog: { "cest" => [{ "key" => ["22021000"], "data" => { "cest" => ["0300700"] } }] })
 cases!("ICMS.ST.CATALOG", fire: [["NCM com ST na UF e CST 00", B.doc(normal: true, item: { product: { ncm: "22021000" } })]], pass: [["NCM com ST e CST 10", B.doc(normal: true, item: { product: { ncm: "22021000", cfop: "5403" }, icms: { cst: "10", group: "ICMS10" } })]], scenario: PRESUMIDO, catalog: { "st_uf" => [{ "key" => ["SP", "22021000"], "data" => { "applies" => true } }] })
@@ -63,7 +102,9 @@ sale100 = numbered(100)
 cases!("DOC.RETURN.ORIGINAL_MISSING", fire: [["devolução da própria venda sem original na base", own_return.("102")]], pass: [["original na base", [sale100, own_return.("102")]], ["devolução de compra (original de terceiro)", ret_doc.("900")]])
 cases!("DOC.RETURN.EXCEEDS_ORIGINAL", fire: [["devolve 3 de 2", [sale100, own_return.("102", "1202", { "items" => [B.item(product: { cfop: "1202", commercial_quantity: "3.0000" })] })]]], pass: [["devolve 1 de 2", [sale100, own_return.("102", "1202", { "items" => [B.item(product: { cfop: "1202", commercial_quantity: "1.0000" })] })]]])
 cases!("DOC.RETURN.MIRROR", fire: [["venda 102 devolvida com 900", [sale100, own_return.("900")]], ["CFOP 1201 para venda 5102", [sale100, own_return.("102", "1201")]]],
-       pass: [["espelho correto (102/1202)", [sale100, own_return.("102")]], ["regime normal espelhando CST 00", [numbered(100, issuer: { crt: "3" }).tap { |d| d["items"] = [B.normal_item] }, B.doc(normal: true, item: { product: { cfop: "1202" } }, doc: { access_key: key_for(200), issuance: { number: 200, purpose: "return" }, operation: { direction_declared: "inbound" }, references: [{ kind: "nfe", access_key: key_for(100) }] })], PRESUMIDO]])
+       pass: [["espelho correto (102/1202)", [sale100, own_return.("102")]],
+              # CST de PIS/COFINS não é espelhado: a devolução é entrada e usa 50-99 (Tabela 4.3.3), o oposto da saída
+              ["regime normal espelhando CST 00, com PIS/COFINS de entrada", [numbered(100, issuer: { crt: "3" }).tap { |d| d["items"] = [B.normal_item] }, B.doc(normal: true, item: { product: { cfop: "1202" }, pis: { cst: "50" }, cofins: { cst: "50" } }, doc: { access_key: key_for(200), issuance: { number: 200, purpose: "return" }, operation: { direction_declared: "inbound" }, references: [{ kind: "nfe", access_key: key_for(100) }] })], PRESUMIDO]])
 cases!("SCENARIO.ST.DISAGREEMENT", fire: [["notas com ST e cenário sem", B.doc(normal: true, item: { product: { cfop: "5405" }, icms: { cst: "60", group: "ICMS60", base_amount: nil, rate: nil, amount: nil } })]], pass: [["sem ST", B.doc]], scenario: PRESUMIDO.merge("st" => { "source" => "catalog", "applies" => false, "overrides" => [] }))
 cases!("SCENARIO.IPI.DISAGREEMENT", fire: [["IPI destacado e cenário sem IPI", B.doc(normal: true, item: { ipi: { cst: "50", taxed: true, base_amount: "1000.00", rate: "5.00", amount: "50.00" } })]], pass: [["sem IPI", B.doc(normal: true)]], scenario: PRESUMIDO)
 cases!("DOC.DUPLICATE.NUMBER_SERIES", fire: [["mesmo número, chaves diferentes", [numbered(100), numbered(100, access_key: key_for(999))]]], pass: [["números distintos", [numbered(100), numbered(101)]]])
@@ -71,14 +112,17 @@ cases!("DOC.DUPLICATE.NUMBER_SERIES", fire: [["mesmo número, chaves diferentes"
 # ---- base completa (05)
 cases!("DOC.SIMPLES.INFO_TEXT", fire: [["sem frase do Simples", B.doc(doc: { additional_info: { complementary: "obrigado pela preferência" } })]], pass: [["com frase", B.doc], ["regime normal", B.doc(normal: true), PRESUMIDO]])
 cases!("DOC.CONSUMER.TAX_TRANSPARENCY", fire: [["consumidor final sem vTotTrib", B.doc(doc: { operation: { final_consumer: true }, totals: { approx_taxes: nil } })]], pass: [["com vTotTrib", B.doc(doc: { operation: { final_consumer: true } })], ["não consumidor final", B.doc(doc: { totals: { approx_taxes: nil } })]])
-cases!("DOC.NFCE.IDENTIFY_CONSUMER", fire: [["NFC-e 12k sem CPF", nfce.(totals: { total: "12000.00" })]], pass: [["NFC-e 500", nfce.()], ["NFC-e 12k com CPF", nfce.(totals: { total: "12000.00" }, recipient: { cpf: "12345678909" })]])
+cases!("DOC.NFCE.IDENTIFY_CONSUMER", fire: [["NFC-e 12k sem CPF", nfce.(totals: { total: "12000.00" })], ["NFC-e de R$ 10.000,00 exatos sem CPF (limite: igual ou superior)", nfce.(totals: { total: "10000.00" })]],
+       pass: [["NFC-e 500", nfce.()], ["NFC-e 12k com CPF", nfce.(totals: { total: "12000.00" }, recipient: { cpf: "12345678909" })], ["NFC-e de R$ 9.999,99", nfce.(totals: { total: "9999.99" })]])
 cases!("DOC.COMPLEMENTARY.REFERENCE", fire: [["complementar sem ref", B.doc(doc: { issuance: { purpose: "complementary" } })]], pass: [["complementar com ref", B.doc(doc: { issuance: { purpose: "complementary" }, references: [{ kind: "nfe", access_key: "35260312345678000190550010000000011000000001" }] })]])
 cases!("DOC.ISSUER.UF_SCENARIO", fire: [["emitente MG em cenário SP", B.doc(doc: { issuer: { uf: "MG", address: { uf: "MG" } } })]], pass: [["SP", B.doc]])
 cases!("DOC.ISSUER.IE_SCENARIO", fire: [["sem IE", B.doc(doc: { issuer: { ie: nil } })]], pass: [["com IE", B.doc]])
 cases!("DOC.RETURN.CFOP_REQUIRES_REFERENCE", fire: [["CFOP 5202 sem NFref", B.doc(item: { product: { cfop: "5202" } })]], pass: [["5202 com NFref", B.doc(item: { product: { cfop: "5202" } }, doc: { references: [{ kind: "nfe", access_key: "35260312345678000190550010000000011000000001" }] })], ["5102", B.doc]])
 cases!("DOC.ITEM.DISCOUNT_OVER_PRODUCT", fire: [["desconto > produto", B.doc(item: { product: { discount: "1500.00" } })]], pass: [["desconto normal", B.doc(item: { product: { discount: "100.00" } })]])
 cases!("CFOP.ST.SUBSTITUTED_CST", fire: [["5405 com CSOSN 102", B.doc(item: { product: { cfop: "5405" } })]], pass: [["5405 com CSOSN 500", B.doc(item: { product: { cfop: "5405" }, icms: { group: "ICMSSN500", csosn: "500" } })], ["5102", B.doc]])
-cases!("CFOP.ST.SUBSTITUTE_CST", fire: [["5403 com CST 00", B.doc(normal: true, item: { product: { cfop: "5403" } })]], pass: [["5403 com CST 10", B.doc(normal: true, item: { product: { cfop: "5403" }, icms: { cst: "10", group: "ICMS10" } })]], scenario: PRESUMIDO)
+cases!("CFOP.ST.SUBSTITUTE_CST", fire: [["5403 com CST 00", B.doc(normal: true, item: { product: { cfop: "5403" } })]],
+       pass: [["5403 com CST 10", B.doc(normal: true, item: { product: { cfop: "5403" }, icms: { cst: "10", group: "ICMS10" } })],
+              ["5411 (devolução de compra com ST) com CST 60", B.doc(normal: true, item: { product: { cfop: "5411" }, icms: { cst: "60", group: "ICMS60", base_amount: nil, rate: nil, amount: nil } }, doc: { issuance: { purpose: "return" }, references: [{ kind: "nfe", access_key: "35260299887766000155550010000009991000009999" }] })]], scenario: PRESUMIDO)
 cases!("CFOP.ST.NONE_WITH_ST_CST", fire: [["5102 com CSOSN 500", B.doc(item: { icms: { group: "ICMSSN500", csosn: "500" } })]], pass: [["5102 com 102", B.doc], ["5405 com 500", B.doc(item: { product: { cfop: "5405" }, icms: { group: "ICMSSN500", csosn: "500" } })]])
 cases!("CFOP.OWN_PRODUCTION.INDUSTRY", fire: [["5101 em comércio", B.doc(item: { product: { cfop: "5101" } })]], pass: [["5101 em indústria", B.doc(item: { product: { cfop: "5101" } }), SIMPLES.merge("activity" => %w[industry])], ["5102", B.doc]])
 cases!("ICMS.RATE.INTERNAL", fire: [["SP interna com 12%", B.doc(normal: true, item: { icms: { rate: "12.00", amount: "120.00" } })]], pass: [["SP interna 18%", B.doc(normal: true)], ["NCM com alíquota específica 12%", B.doc(normal: true, item: { product: { ncm: "22021000" }, icms: { rate: "12.00", amount: "120.00" } })]], scenario: PRESUMIDO, catalog: { "icms_internal_rate" => [{ "key" => ["SP", "*"], "data" => { "rate" => "18.00", "fcp_rate" => "0.00" } }, { "key" => ["SP", "22021000"], "data" => { "rate" => "12.00" } }] })
@@ -87,7 +131,8 @@ cases!("ICMS.REDUCED_BASE.PCT_REQUIRED", fire: [["CST 20 sem pRedBC", B.doc(norm
 cases!("ICMS.CST00.WITH_REDUCTION", fire: [["CST 00 com pRedBC", B.doc(normal: true, item: { icms: { base_reduction_pct: "10.00" } })]], pass: [["CST 00 sem", B.doc(normal: true)]], scenario: PRESUMIDO)
 cases!("ICMS.CST51.DEFERRAL_FIELDS", fire: [["CST 51 sem diferimento", B.doc(normal: true, item: { icms: { cst: "51", group: "ICMS51" } })]], pass: [["CST 51 com pDif", B.doc(normal: true, item: { icms: { cst: "51", group: "ICMS51", deferral: { pct: "100.00", deferred_amount: "180.00" } } })]], scenario: PRESUMIDO)
 cases!("ICMS.FCP.EXPECTED", fire: [["RJ sem FCP", B.doc(normal: true, item: { icms: { rate: "20.00", amount: "200.00" } }, doc: { issuer: { uf: "RJ", address: { uf: "RJ" } }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]], pass: [["RJ com FCP", B.doc(normal: true, item: { icms: { rate: "20.00", amount: "200.00", fcp: { rate: "2.00", amount: "20.00" } } }, doc: { issuer: { uf: "RJ", address: { uf: "RJ" } }, recipient: { uf: "RJ", address: { uf: "RJ" } } })], ["SP (sem FCP)", B.doc(normal: true)]], scenario: PRESUMIDO.merge("uf" => "RJ"))
-cases!("ICMS.SIMPLES.CREDIT_RATE", fire: [["pCredSN 5%", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "5.00", amount: "50.00" } } })]], pass: [["pCredSN 2,8%", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "28.00" } } })]])
+cases!("ICMS.SIMPLES.CREDIT_RATE", fire: [["pCredSN 5%", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "5.00", amount: "50.00" } } })], ["pCredSN 1,24% (abaixo do piso)", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "1.24", amount: "12.40" } } })]],
+       pass: [["pCredSN 2,8%", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "28.00" } } })], ["pCredSN 1,25% (piso da faixa)", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "1.25", amount: "12.50" } } })], ["pCredSN 3,95% (teto da faixa)", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "3.95", amount: "39.50" } } })]])
 cases!("ICMS.SIMPLES.CREDIT_CALC", fire: [["crédito errado", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "20.00" } } })]], pass: [["crédito correto", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "28.00" } } })]])
 cases!("DOC.SIMPLES.CREDIT_TEXT", fire: [["101 sem expressão do art. 60", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "28.00" } } })]],
        pass: [["101 com expressão", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101", simples_credit: { rate: "2.80", amount: "28.00" } } }, doc: { additional_info: { complementary: "PERMITE O APROVEITAMENTO DO CRÉDITO DE ICMS NO VALOR DE R$ 28,00; CORRESPONDENTE À ALÍQUOTA DE 2,80%" } })], ["102", B.doc]])
@@ -95,22 +140,28 @@ cases!("SCENARIO.REGIME.REAL_VS_SIMPLES", fire: [["CRT 1 em cenário Real", B.do
 cases!("ICMS.SIMPLES.CREDIT_TO_NON_TAXPAYER", fire: [["101 para não contribuinte", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101" } }, doc: { recipient: { ie_indicator: "non_taxpayer" } })]], pass: [["101 para contribuinte", B.doc(item: { icms: { group: "ICMSSN101", csosn: "101" } })]])
 st_item = { product: { cfop: "5403" }, icms: { cst: "10", group: "ICMS10" }, icms_st: { base_mode: "4", mva_pct: "40.00", base_amount: "1400.00", rate: "18.00", amount: "72.00" } }
 cases!("ICMS.ST.BASE_MVA", fire: [["base ST sem MVA aplicada", B.doc(normal: true, item: B.deep_merge(st_item.deep_stringify_keys, { "icms_st" => { "base_amount" => "1000.00", "amount" => "0.00" } }))]], pass: [["base ST correta", B.doc(normal: true, item: st_item)]], scenario: PRESUMIDO)
-cases!("ICMS.ST.AMOUNT_CALC", fire: [["vICMSST errado", B.doc(normal: true, item: B.deep_merge(st_item.deep_stringify_keys, { "icms_st" => { "amount" => "252.00" } }))]], pass: [["vICMSST correto", B.doc(normal: true, item: st_item)]], scenario: PRESUMIDO)
-cases!("ICMS.ST.WITHHELD_FIELDS", fire: [["CST 60 sem retido", B.doc(normal: true, item: { product: { cfop: "5405" }, icms: { cst: "60", group: "ICMS60", base_amount: nil, rate: nil, amount: nil } })]], pass: [["CST 60 com retido", B.doc(normal: true, item: { product: { cfop: "5405" }, icms: { cst: "60", group: "ICMS60", base_amount: nil, rate: nil, amount: nil }, icms_st: { withheld: { base_amount: "900.00", amount: "50.00" } } })]], scenario: PRESUMIDO)
+st_simples_item = { product: { cfop: "5403" }, icms: { group: "ICMSSN201", csosn: "201" }, icms_st: { base_mode: "4", mva_pct: "40.00", base_amount: "1400.00", rate: "18.00", amount: "72.00" } }
+cases!("ICMS.ST.AMOUNT_CALC", fire: [["vICMSST errado", B.doc(normal: true, item: B.deep_merge(st_item.deep_stringify_keys, { "icms_st" => { "amount" => "252.00" } }))]],
+       pass: [["vICMSST correto", B.doc(normal: true, item: st_item)],
+              ["diferença de 0,05 (dentro da tolerância)", B.doc(normal: true, item: B.deep_merge(st_item.deep_stringify_keys, { "icms_st" => { "amount" => "72.05" } }))],
+              ["substituto optante do Simples (CSOSN 201): dedução do ICMS próprio não está no XML", B.doc(item: st_simples_item), SIMPLES]],
+       findings: [{ "item_number" => 1, "severity" => "error", "evidence" => { "item.icms_st.amount" => "252.00", "item.icms_st.expected_amount" => "72.00" } }], scenario: PRESUMIDO)
+st60_item = { product: { cfop: "5405" }, icms: { cst: "60", group: "ICMS60", base_amount: nil, rate: nil, amount: nil } }
+cases!("ICMS.ST.WITHHELD_FIELDS", fire: [["CST 60 sem retido", B.doc(normal: true, item: st60_item)]],
+       pass: [["CST 60 com retido", B.doc(normal: true, item: B.deep_merge(st60_item.deep_stringify_keys, { "icms_st" => { "withheld" => { "base_amount" => "900.00", "amount" => "50.00" } } }))],
+              ["CST 60 a consumidor final (indFinal=1) sem retido", B.doc(normal: true, item: st60_item, doc: { operation: { final_consumer: true } })]], scenario: PRESUMIDO)
 difal_item = { product: { cfop: "6108" }, icms: { rate: "12.00", amount: "120.00" }, icms_uf_dest: { base_amount: "1000.00", destination_internal_rate: "20.00", interstate_rate: "12.00", destination_amount: "80.00" } }
 difal_doc = { operation: { scope: "interstate", final_consumer: true }, recipient: { cnpj: nil, cpf: "12345678909", ie: nil, ie_indicator: "non_taxpayer", uf: "RJ", address: { uf: "RJ" } } }
 cases!("DIFAL.CALC", fire: [["DIFAL errado", B.doc(normal: true, item: B.deep_merge(difal_item.deep_stringify_keys, { "icms_uf_dest" => { "destination_amount" => "40.00" } }), doc: difal_doc)]], pass: [["DIFAL correto", B.doc(normal: true, item: difal_item, doc: difal_doc)]], scenario: PRESUMIDO)
 cases!("DIFAL.INTERSTATE_RATE", fire: [["pICMSInter 7% SP→RJ", B.doc(normal: true, item: B.deep_merge(difal_item.deep_stringify_keys, { "icms_uf_dest" => { "interstate_rate" => "7.00" } }), doc: difal_doc)]], pass: [["12% SP→RJ", B.doc(normal: true, item: difal_item, doc: difal_doc)]], scenario: PRESUMIDO)
 cases!("DIFAL.SIMPLES", fire: [["Simples com DIFAL", B.doc(item: { icms_uf_dest: { base_amount: "1000.00", destination_amount: "80.00" } }, doc: difal_doc)]], pass: [["Simples sem DIFAL", B.doc]])
-cases!("ICMS.IMPORTED.ORIGIN_INTERSTATE", fire: [["origem 1 com 12%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "1", rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]],
-       pass: [["origem 1 com 4%", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "1", rate: "4.00", amount: "40.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })],
-              ["origem 6 (sem similar nacional) com 12% — fora da Res. 13", B.doc(normal: true, item: { product: { cfop: "6102" }, icms: { origin: "6", rate: "12.00", amount: "120.00" } }, doc: { operation: { scope: "interstate" }, recipient: { uf: "RJ", address: { uf: "RJ" } } })]], scenario: PRESUMIDO)
+# ICMS.IMPORTED.ORIGIN_INTERSTATE e IBSCBS.NFCE.GROUP foram retiradas (duplicavam ICMS.RATE.INTERSTATE e
+# IBSCBS.GROUP.REQUIRED v2); os casos de origem importada estão em ICMS.RATE.INTERSTATE.
 ipi_item = { ipi: { cst: "50", taxed: true, base_amount: "1000.00", rate: "5.00", amount: "50.00" } }
 cases!("IPI.CST.DIRECTION", fire: [["saída com CST 00", B.doc(normal: true, item: { ipi: { cst: "00", taxed: true, base_amount: "1000.00", rate: "5.00", amount: "50.00" } })]], pass: [["saída com CST 50", B.doc(normal: true, item: ipi_item)]], scenario: PRESUMIDO.merge("ipi_taxpayer" => true))
 cases!("IPI.AMOUNT.CALC", fire: [["vIPI errado", B.doc(normal: true, item: { ipi: { cst: "50", taxed: true, base_amount: "1000.00", rate: "5.00", amount: "40.00" } })]], pass: [["vIPI correto", B.doc(normal: true, item: ipi_item)]], scenario: PRESUMIDO.merge("ipi_taxpayer" => true))
 cases!("IPI.SIMPLES.HIGHLIGHT", fire: [["Simples com IPI", B.doc(item: ipi_item)]], pass: [["Simples sem IPI", B.doc]])
-cases!("IPI.RATE.TIPI", fire: [["IPI 5% vs TIPI 10%", B.doc(normal: true, item: ipi_item)]], pass: [["IPI 5% = TIPI", B.doc(normal: true, item: ipi_item)]], scenario: PRESUMIDO.merge("ipi_taxpayer" => true), catalog: { "tipi" => [{ "key" => ["84713012"], "data" => { "rate" => "10.00" } }] }) if false
-# IPI.RATE.TIPI precisa de stub diferente por caso:
+# IPI.RATE.TIPI precisa de stub de catálogo diferente por caso (cases! usa um só), por isso os casos são criados à mão:
 rule = Rules::Rule.find_by(code: "IPI.RATE.TIPI")
 if rule && !rule.test_cases.exists?
   rule.test_cases.create!(name: "dispara: IPI 5% vs TIPI 10%", reference_date: "2026-03-14", scenario: PRESUMIDO.merge("ipi_taxpayer" => true), catalog: { "tipi" => [{ "key" => ["84713012"], "data" => { "rate" => "10.00" } }] }, input: { "kind" => "canonical", "document" => B.doc(normal: true, item: ipi_item), "monitored_cnpj" => "12345678000190" }, expect: { "findings" => [{ "severity" => "error" }] })
@@ -131,7 +182,6 @@ cases!("IBSCBS.BASE.OPERATION_VALUE", fire: [["base 500 para item 1000", B.doc(i
 cases!("IBSCBS.CST.REDUCTION_FIELDS", fire: [["CST 200 sem pRedAliq", B.doc(item: { ibs_cbs: { cst: "200", class_code: "200003" } })]], pass: [["CST 200 com pRedAliq", B.doc(item: { ibs_cbs: { cst: "200", class_code: "200003", cbs: { reduction_pct: "60.00", effective_rate: "0.36", amount: "3.60" } } })]])
 cases!("IBSCBS.CST000.WITH_REDUCTION", fire: [["CST 000 com redução", B.doc(item: { ibs_cbs: { cbs: { reduction_pct: "60.00" } } })]], pass: [["CST 000 sem", B.doc]])
 cases!("IBSCBS.CLASS_CODE.FORMAT", fire: [["cClassTrib 5 dígitos", B.doc(item: { ibs_cbs: { class_code: "00001" } })]], pass: [["6 dígitos", B.doc]])
-cases!("IBSCBS.NFCE.GROUP", fire: [["NFC-e sem grupo", nfce.().tap { |d| d["items"][0]["ibs_cbs"] = { "present" => false } }]], pass: [["NFC-e com grupo", nfce.()]], date: "2026-08-15")
 cases!("DOC.NUMBERING.ORDER", fire: [["101 emitida antes da 100", [numbered(100, issuance: { issued_at: "2026-03-14T10:00:00-03:00" }), numbered(101, issuance: { issued_at: "2026-03-10T10:00:00-03:00" })]]],
        pass: [["ordem cronológica", [numbered(100, issuance: { issued_at: "2026-03-10T10:00:00-03:00" }), numbered(101, issuance: { issued_at: "2026-03-14T10:00:00-03:00" })]]])
 cases!("DOC.EVENT.CONSISTENCY", fire: [["cancelamento 3 dias depois", { "documents" => [numbered(100)], "events" => [{ "access_key" => key_for(100), "event" => { "kind" => "cancellation", "occurred_at" => "2026-03-17T10:22:00-03:00" } }] }],
@@ -143,5 +193,27 @@ cases!("SCENARIO.REGIME.NORMAL_VS_SIMPLES", fire: [["CRT 1 em cenário Presumido
 cases!("SCENARIO.NFCE.DISAGREEMENT", fire: [["NFC-e com cenário sem NFC-e", nfce.()]], pass: [["NF-e", B.doc]])
 cases!("SCENARIO.FINAL_CONSUMER.DISAGREEMENT", fire: [["consumidor final", B.doc(doc: { operation: { final_consumer: true } })]], pass: [["contribuinte", B.doc]])
 cases!("SCENARIO.EXPORTS.DISAGREEMENT", fire: [["CFOP 7102", B.doc(item: { product: { cfop: "7102" } }, doc: { operation: { scope: "foreign" }, recipient: { cnpj: nil, foreign_id: "X1", ie_indicator: "non_taxpayer", uf: "EX", address: { uf: "EX" } } })]], pass: [["5102", B.doc]])
+
+# ---- curadoria da tabela de CFOP (09/09/2026): cada linha corrigida vira caso, para ninguém "corrigir de volta"
+# 5.402/6.402 = venda entre contribuintes substitutos do MESMO produto: não há retenção (Conv. ICMS 142/2018, cláusula nona, I) e o CST é 00
+case!("CFOP.ST.SUBSTITUTE_CST", "não dispara: 5402 com CST 00 (venda entre substitutos do mesmo produto)",
+      B.doc(normal: true, item: { product: { cfop: "5402" } }), scenario: PRESUMIDO)
+# 5.409/6.409 = transferência de mercadoria com ST já retida: sai com CST 60 / CSOSN 500
+case!("CFOP.ST.NONE_WITH_ST_CST", "não dispara: 5409 com CST 60 (transferência de mercadoria com ST retida)",
+      B.doc(normal: true, item: { product: { cfop: "5409" }, icms: { group: "ICMS60", cst: "60", base_amount: nil, rate: nil, amount: nil } }), scenario: PRESUMIDO)
+case!("CFOP.ST.NONE_WITH_ST_CST", "não dispara: 5409 com CSOSN 500 (Simples)",
+      B.doc(item: { product: { cfop: "5409" }, icms: { group: "ICMSSN500", csosn: "500" } }))
+# 5.205/5.213 = anulação de valor, não devolução: sai com finNFe 1
+case!("CFOP.RETURN.PURPOSE", "não dispara: 5205 (anulação de valor de serviço de comunicação) com finNFe normal",
+      B.doc(normal: true, item: { product: { cfop: "5205" } }), scenario: PRESUMIDO)
+case!("CFOP.RETURN.PURPOSE", "não dispara: 5213 (anulação de ressarcimento de ICMS-ST) com finNFe normal",
+      B.doc(normal: true, item: { product: { cfop: "5213" } }), scenario: PRESUMIDO)
+# tabela de CFOP sem versão vigente na data: a natureza fica ausente e a regra não pode acusar (nem virar evaluation_error)
+case!("PISCOFINS.CST.REGIME", "não dispara: CST 49 com a tabela de CFOP indisponível na data (natureza ausente)",
+      B.doc(normal: true, item: { pis: { cst: "49" } }, doc: { issuance: { issued_at: "2002-06-14T10:22:00-03:00" } }), date: "2002-06-14", scenario: PRESUMIDO)
+# 6.108 (venda interestadual a não contribuinte) devolve com 2.202; sem a linha no cfop_mirror a primitiva pulava em silêncio
+sale6108 = B.doc(item: { product: { cfop: "6108" } }, doc: { access_key: key_for(100), issuance: { number: 100 }, operation: { scope: "interstate", final_consumer: true }, recipient: { uf: "MG", address: { uf: "MG" } } })
+case!("DOC.RETURN.MIRROR", "dispara: devolução de venda 6108 com CFOP 2201 (esperado 2202)", [sale6108, own_return.("102", "2201")], findings: [{ "severity" => "error", "message_includes" => "2202" }])
+case!("DOC.RETURN.MIRROR", "não dispara: devolução de venda 6108 com CFOP 2202", [sale6108, own_return.("102", "2202")])
 
 puts "rule test cases: #{Rules::RuleTestCase.count} (#{Rules::Rule.where.missing(:test_cases).count} regras sem caso)"

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@primeuix/themes": "^1.2.5",
@@ -25,8 +26,11 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.5.0",
+    "happy-dom": "^20.14.0",
     "tailwindcss": "^4.3.3",
     "tailwindcss-primeui": "^0.6.1",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

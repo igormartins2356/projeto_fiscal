@@ -34,7 +34,9 @@ Rails.application.routes.draw do
       resources :findings, only: :update
       resources :rule_overrides, only: %i[index create update destroy]
       resources :reference_row_overrides, only: %i[index create update destroy]
-      get "reference_tables", to: "admin/reference_tables#index"   # leitura para qualquer usuário autenticado (nomes das tabelas)
+      # Leitura para qualquer usuário autenticado (nomes e chaves das tabelas). O marcador vem do path_parameters
+      # da rota — autorizar por prefixo de `request.path` falhava em aberto quando a app roda sob um SCRIPT_NAME.
+      get "reference_tables", to: "admin/reference_tables#index", defaults: { public_listing: true }
 
       namespace :admin do
         resources :rules, only: %i[index show create update] do

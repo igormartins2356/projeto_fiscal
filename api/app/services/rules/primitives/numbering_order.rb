@@ -13,7 +13,7 @@ module Rules
         docs.group_by { |d| [d["model"], d.dig("issuance", "series")] }.flat_map do |(model, series), group|
           sorted = group.sort_by { |d| d.dig("issuance", "number") }
           sorted.each_cons(2).filter_map do |a, b|
-            ta, tb = Time.zone.parse(a.dig("issuance", "issued_at")), Time.zone.parse(b.dig("issuance", "issued_at"))
+            ta, tb = Dsl::Value.to_time(a.dig("issuance", "issued_at")), Dsl::Value.to_time(b.dig("issuance", "issued_at"))
             next unless tb < ta - tol.days
             { target: { document_id: b["_id"] },
               evidence: { "model" => model, "series" => series, "number" => b.dig("issuance", "number"), "issued_at" => b.dig("issuance", "issued_at"), "previous_number" => a.dig("issuance", "number"), "previous_issued_at" => a.dig("issuance", "issued_at") },

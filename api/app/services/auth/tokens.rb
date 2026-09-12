@@ -10,9 +10,14 @@ module Auth
 
     def self.secret = ENV.fetch("JWT_SECRET") { Rails.application.secret_key_base }
 
+    # `pwd` = marca da última troca de senha. Sem ela, revogar os refresh tokens não derrubava a sessão:
+    # o access token do invasor continuava valendo por até ACCESS_TTL depois do reset feito pelo administrador.
     def self.issue_access(user)
-      encode(sub: user.id, firm: user.firm_id, role: user.role, purpose: "access", exp: ACCESS_TTL.from_now.to_i)
+      encode(sub: user.id, firm: user.firm_id, role: user.role, purpose: "access",
+             pwd: password_stamp(user), exp: ACCESS_TTL.from_now.to_i)
     end
+
+    def self.password_stamp(user) = user.password_changed_at&.to_i.to_i
 
     def self.issue_mfa(user)
       encode(sub: user.id, purpose: "mfa", exp: MFA_TTL.from_now.to_i)
@@ -36,12 +41,17 @@ module Auth
     # Rotação: token válido → revoga e emite outro na mesma família. Token já usado → revoga a família (possível roubo).
     def self.rotate_refresh(raw, request: nil)
       record = Auth::RefreshToken.find_by(token_digest: digest(raw)) or raise Invalid, "refresh token unknown"
-      if record.revoked? || record.expired?
+      # A revogação é a própria reserva do token: duas requisições simultâneas com o mesmo refresh só podem
+      # afetar 1 linha, então apenas uma emite o próximo token — a outra cai no caminho de reuso.
+      claimed = Auth::RefreshToken.where(id: record.id, revoked_at: nil).where("expires_at > ?", Time.current)
+                                  .update_all(revoked_at: Time.current)
+      if claimed != 1
         Auth::RefreshToken.where(family: record.family).update_all(revoked_at: Time.current)
         raise Invalid, "refresh token reused or expired"
       end
-      record.update!(revoked_at: Time.current)
-      [record.user, issue_refresh(record.user, request:, family: record.family)]
+      user = record.user
+      raise Invalid, "usuário inativo" unless user.active
+      [user, issue_refresh(user, request:, family: record.family)]
     end
 
     def self.revoke_refresh(raw)

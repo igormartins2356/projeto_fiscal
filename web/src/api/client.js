@@ -19,13 +19,17 @@ api.interceptors.request.use((config) => {
 })
 
 // 401 → tenta refresh (uma vez, com fila para requisições concorrentes) → repete; falhando, limpa sessão.
+// Só login/mfa/refresh ficam fora do refresh: /auth/me e /auth/otp/* precisam dele (2FA após o access token expirar).
+const NO_REFRESH = ['/auth/login', '/auth/mfa', '/auth/refresh']
 let refreshing = null
 export const onSessionLost = { handler: null }
+function sessionLost() { saveSession(null); onSessionLost.handler?.() }
 api.interceptors.response.use(undefined, async (error) => {
   const { config, response } = error
-  if (response?.status !== 401 || config._retried || config.url.startsWith('/auth/')) throw error
+  if (response?.status !== 401 || config._retried || NO_REFRESH.some(p => config.url.startsWith(p))) throw error
   const s = loadSession()
-  if (!s?.refresh_token) throw error
+  // 401 sem refresh_token: a sessão local está morta; sem isto o app fica "autenticado" com tudo falhando.
+  if (!s?.refresh_token) { sessionLost(); throw error }
   try {
     refreshing ??= axios.post(`${BASE}/auth/refresh`, { refresh_token: s.refresh_token }).then(r => r.data).finally(() => { refreshing = null })
     const fresh = await refreshing
@@ -33,11 +37,14 @@ api.interceptors.response.use(undefined, async (error) => {
     config._retried = true
     return api(config)
   } catch (e) {
-    saveSession(null)
-    onSessionLost.handler?.()
+    sessionLost()
     throw e
   }
 })
+
+// Listagens paginadas server-side: { data, total, page, per_page }. Tolera resposta em array puro
+// (o DataTable lazy recebe sempre o mesmo formato, mesmo se um endpoint voltar a responder sem paginação).
+export function asPage(res) { return Array.isArray(res) ? { data: res, total: res.length } : res }
 
 export const auth = {
   login: (email, password) => api.post('/auth/login', { email, password }).then(r => r.data),
@@ -47,7 +54,7 @@ export const auth = {
   otpSetup: () => api.post('/auth/otp/setup').then(r => r.data),
   otpEnable: (code) => api.post('/auth/otp/enable', { code }).then(r => r.data),
   otpDisable: (password, code) => api.delete('/auth/otp', { data: { password, code } }).then(r => r.data),
-  changePassword: (current_password, password) => api.post('/users/change_password', { current_password, password }),
+  changePassword: (current_password, password) => api.post('/users/change_password', { current_password, password }).then(r => r.data),
 }
 export const users = {
   list: () => api.get('/users').then(r => r.data),
@@ -61,12 +68,12 @@ export const uploads = {
   get: (id) => api.get(`/uploads/${id}`).then(r => r.data),
 }
 export const fiscalFiles = {
-  list: () => api.get('/fiscal_files').then(r => r.data),
+  list: (params = {}) => api.get('/fiscal_files', { params }).then(r => asPage(r.data)),
   get: (id) => api.get(`/fiscal_files/${id}`).then(r => r.data),
   create: (file) => { const f = new FormData(); f.append('file', file); return api.post('/fiscal_files', f) },
 }
 export const auditRuns = {
-  list: () => api.get('/audit_runs').then(r => r.data),
+  list: (params = {}) => api.get('/audit_runs', { params }).then(r => asPage(r.data)),
   get: (id) => api.get(`/audit_runs/${id}`).then(r => r.data),
   create: (params) => api.post('/audit_runs', params).then(r => r.data),
   findings: (id, params = {}) => api.get(`/audit_runs/${id}/findings`, { params }).then(r => r.data),

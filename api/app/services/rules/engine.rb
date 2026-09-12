@@ -2,7 +2,7 @@ module Rules
   # Motor genérico: recebe regras resolvidas + contexto → findings (Hash) e evaluation_errors.
   # Não conhece valor fiscal algum.
   class Engine
-    Finding = Struct.new(:rule, :definition, :source, :document_id, :item_number, :fiscal_record_id, :message, :evidence, :vars, :group_key, keyword_init: true)
+    Finding = Struct.new(:rule, :definition, :source, :document_id, :item_number, :fiscal_record_id, :message, :evidence, :group_key, keyword_init: true)
 
     attr_reader :findings, :errors
 
@@ -28,12 +28,17 @@ module Rules
     end
 
     # period: { "documents" => [canônicos], "invalidations" => [], "events" => [] }
-    def evaluate_period(period, fiscal_file: nil, stats: nil)
+    # only: ids de Rules::Rule a avaliar (o Runner escolhe em qual fatia de vigência cada regra de período roda)
+    def evaluate_period(period, fiscal_file: nil, stats: nil, only: nil)
       base = { "period" => period, "scenario" => @scenario, "catalog" => @catalog, "fiscal_file" => fiscal_file, "stats" => stats }
-      @rules.select { |r| %w[cross_document period scenario].include?(r.definition["scope"]) }.each { |r| evaluate(r, base) }
+      period_rules.each { |r| evaluate(r, base) if only.nil? || only.include?(r.rule.id) }
     end
 
+    def period_rule_ids = period_rules.map { |r| r.rule.id }
+
     private
+
+    def period_rules = @rules.select { |r| %w[cross_document period scenario].include?(r.definition["scope"]) }
 
     def evaluate(r, ctx, document_id: nil, item_number: nil)
       d = r.definition
@@ -53,11 +58,13 @@ module Rules
         return if Dsl::Condition.evaluate(d["assert"], ctx)
         emit(r, ctx, document_id:, item_number:)
       end
-    rescue EvaluationError => e
+    rescue StandardError => e
+      # qualquer falha da regra (inclusive bug de primitiva) fica contida no evaluation_error dela: um run nunca cai por causa de uma regra
+      message = e.is_a?(EvaluationError) ? e.message : "#{e.class}: #{e.message}"
       # deduplicado por regra+mensagem: um lookup em tabela ausente geraria um erro por item
-      existing = @errors.find { |x| x[:rule_code] == d["code"] && x[:error] == e.message }
+      existing = @errors.find { |x| x[:rule_code] == d["code"] && x[:error] == message }
       if existing then existing[:count] += 1
-      else @errors << { rule_code: d["code"], version: d["version"], document_id:, item_number:, error: e.message, count: 1 }
+      else @errors << { rule_code: d["code"], version: d["version"], document_id:, item_number:, error: message, count: 1 }
       end
     end
 
@@ -68,7 +75,7 @@ module Rules
         v = Dsl::Path.fetch(ctx, p)
         h[p] = Dsl::Path.absent?(v) ? nil : Dsl::Template.format(v)
       end.merge(extra_evidence)
-      group_key = Array(d["group_by"]).map { |p| Dsl::Template.format(Dsl::Path.fetch(ctx, p)) }.join("|").presence
+      group_key = Array(d["group_by"]).map { |p| v = Dsl::Path.fetch(ctx, p); Dsl::Path.absent?(v) ? "—" : Dsl::Template.format(v) }.join("|").presence
       @findings << Finding.new(rule: r.rule, definition: d, source: r.source, document_id:, item_number:, fiscal_record_id:,
                                message: Dsl::Template.render(d["message"], ctx), evidence:, group_key:)
     end
