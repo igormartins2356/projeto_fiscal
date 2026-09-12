@@ -1,13 +1,21 @@
 require Rails.root.join("lib/rule_case_builder")
 load Rails.root.join("db/seeds/00_helpers.rb") unless respond_to?(:seed_rule!, true)
 B = RuleCaseBuilder unless defined?(B)
-SIMPLES_SC = { "tax_regime" => "lucro_presumido", "uf" => "SP", "icms_taxpayer" => true, "activity" => ["commerce"], "pis_cofins" => { "regime" => "cumulative" } }
+# Cenário dos casos SPED: cross-check XML × EFD independe de regime, mas o cenário é obrigatório no caso de teste.
+PRESUMIDO_SP = { "tax_regime" => "lucro_presumido", "uf" => "SP", "icms_taxpayer" => true, "activity" => ["commerce"], "pis_cofins" => { "regime" => "cumulative" } } unless defined?(PRESUMIDO_SP)
 
 def sped_cases!(code, fire:, pass:)
   rule = Rules::Rule.where(code:).order(version: :desc).first or (puts "  ! #{code}"; return)
   return if rule.test_cases.exists?
-  fire.each { |(name, input)| rule.test_cases.create!(name: "dispara: #{name}", reference_date: "2026-07-31", scenario: SIMPLES_SC, catalog: {}, input:, expect: { "findings" => [{ "severity" => rule.severity }] }) }
-  pass.each { |(name, input)| rule.test_cases.create!(name: "não dispara: #{name}", reference_date: "2026-07-31", scenario: SIMPLES_SC, catalog: {}, input:, expect: { "findings" => [] }) }
+  fire.each { |(name, input)| rule.test_cases.create!(name: "dispara: #{name}", reference_date: "2026-07-31", scenario: PRESUMIDO_SP, catalog: {}, input:, expect: { "findings" => [{ "severity" => rule.severity }] }) }
+  pass.each { |(name, input)| rule.test_cases.create!(name: "não dispara: #{name}", reference_date: "2026-07-31", scenario: PRESUMIDO_SP, catalog: {}, input:, expect: { "findings" => [] }) }
+end
+
+# caso avulso, idempotente pelo nome (a regra já tem casos; sped_cases! só cria o lote inicial)
+def sped_case!(code, name, input, expect)
+  rule = Rules::Rule.where(code:).order(version: :desc).first or (puts "  ! #{code}"; return)
+  return if rule.test_cases.exists?(name:)
+  rule.test_cases.create!(name:, reference_date: "2026-07-31", scenario: PRESUMIDO_SP, catalog: {}, input:, expect:)
 end
 
 def key_for2(n) = "35260712345678000190550010000#{n.to_s.rjust(6, '0')}1000#{n.to_s.rjust(6, '0')}"
@@ -54,5 +62,12 @@ sped_cases!("SPED.DOC.NO_ANALYTIC",
 sped_cases!("SPED.STRUCTURE",
   fire: [["erro do parser", inp.([doc], file.([], errors: [{ "line" => 1, "record" => "0000", "error" => "CNPJ do arquivo difere do cliente" }]))]],
   pass: [["sem erros", inp.([doc], file.([]))]])
+
+# NF-e de emissão própria pode ser de ENTRADA (devolução/retorno de industrialização): o C100 tem IND_EMIT=0
+# e o XML existe na base como inbound — não pode ser apontado como "C100 sem XML".
+entrada_propria = B.doc(normal: true, doc: { "access_key" => key_for2(102), "issuance" => { "number" => 102, "issued_at" => "2026-07-12T10:00:00-03:00" },
+                                             "operation" => { "direction_declared" => "inbound", "nature_text" => "RETORNO DE INDUSTRIALIZACAO" } })
+sped_case!("SPED.DOC.MISSING_IN_FILE", "não dispara: C100 de entrada de emissão própria com XML na base",
+           inp.([doc, entrada_propria], file.([c100(key_for2(100), 100), c100(key_for2(102), 102, { "IND_OPER" => "0" })])), { "findings" => [] })
 
 puts "sped cases: #{Rules::RuleTestCase.joins(:rule).where(rules: { code: Rules::Rule.where("code LIKE 'SPED.%'").select(:code) }).count}"

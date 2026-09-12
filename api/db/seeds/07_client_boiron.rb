@@ -1,5 +1,9 @@
 # Cliente real de teste: BOIRON MEDICAMENTOS HOMEOPATICOS LTDA. (filial 0004)
 # Idempotente: find_or_create_by por firm + cnpj; cenário fica em draft (não publicar).
+# Cliente de teste só existe em development/test (em produção os clientes vêm do cadastro da firma).
+# A base foi zerada em 10/09/2026 para o cadastro de clientes reais: estes dois só voltam sob pedido
+# explícito (SEED_TEST_CLIENTS=1), para um `db:seed` não recriá-los junto com o catálogo e as regras.
+return unless (Rails.env.development? || Rails.env.test?) && ENV["SEED_TEST_CLIENTS"] == "1"
 firm = Accounts::Firm.find_by!(name: "Escritório Piloto")
 admin = Accounts::User.find_by!(email: "admin@fiscal.local")
 
@@ -39,7 +43,8 @@ data = {
   "uses_nfce" => false,
   "exports" => false,
   "imports" => true,
-  "st" => { "source" => "catalog", "overrides" => [] },
+  # IE-ST em 10 UFs: o cliente opera com ST (sem isso SCENARIO.ST.DISAGREEMENT nunca avalia o cenário)
+  "st" => { "source" => "catalog", "applies" => true, "overrides" => [] },
   "benefits" => [],
   "pis_cofins" => { "regime" => "non_cumulative" },
   "ibs_cbs" => { "regime" => "regular" },

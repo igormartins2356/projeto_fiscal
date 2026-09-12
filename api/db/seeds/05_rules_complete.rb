@@ -4,8 +4,12 @@ load Rails.root.join("db/seeds/00_helpers.rb") unless respond_to?(:seed_table!, 
 issuer = { "field" => "doc.role", "op" => "eq", "value" => "issuer" }
 outbound = { "field" => "doc.operation.direction", "op" => "eq", "value" => "outbound" }
 goods = { "field" => "item.is_service", "op" => "eq", "value" => false }
-simples = { "field" => "scenario.tax_regime", "op" => "in", "value" => %w[simples_nacional simples_nacional_excess mei] }
-normal_regime = { "field" => "scenario.tax_regime", "op" => "in", "value" => %w[lucro_presumido lucro_real] }
+# Regimes vêm de 00_helpers.rb: no ICMS o MEI é Simples (CSOSN) e o excesso de sublimite (CRT 2) é regime normal;
+# nos tributos federais (IPI/PIS/COFINS no DAS) o excesso continua Simples.
+simples_icms = regime_in(simples_icms_regimes)
+simples_federal = regime_in(simples_federal_regimes)
+normal_icms = regime_in(normal_icms_regimes)
+normal_federal = regime_in(normal_federal_regimes)
 authorized = { "field" => "doc.status.state", "op" => "eq", "value" => "authorized" }
 def present(f) = { "field" => f, "op" => "present" }
 def eq(f, v) = { "field" => f, "op" => "eq", "value" => v }
@@ -16,7 +20,7 @@ old = Date.new(2010, 1, 1)
 
 # ------------------------------------------------------------------ Documento
 seed_rule!("DOC.SIMPLES.INFO_TEXT", title: "Simples Nacional sem a informação obrigatória em Informações Complementares", scope: "document", severity: "warning", effective_from: old, tags: %w[simples_nacional document],
-  applies_when: { "all" => [issuer, simples, eq("doc.model", "55")] },
+  applies_when: { "all" => [issuer, simples_federal, eq("doc.model", "55")] },
   assert: { "any" => [{ "all" => [present("doc.additional_info.complementary"), { "field" => "doc.additional_info.complementary", "op" => "regex", "value" => "(?i)SIMPLES\\s+NACIONAL" }] },
                       { "all" => [present("doc.additional_info.tax_authority"), { "field" => "doc.additional_info.tax_authority", "op" => "regex", "value" => "(?i)SIMPLES\\s+NACIONAL" }] }] },
   message: "Nota de optante do Simples sem a frase \"Documento emitido por ME ou EPP optante pelo Simples Nacional…\" nas informações complementares.",
@@ -35,10 +39,12 @@ seed_rule!("DOC.NFCE.IDENTIFY_CONSUMER", title: "NFC-e de valor alto sem identif
   message: "NFC-e de R$ {{doc.totals.total}} sem identificação do consumidor (CPF/CNPJ); obrigatória a partir de R$ {{params.limit}}.",
   legal_references: [{ "label" => "Ajuste SINIEF 07/05 (Ajuste SINIEF 19/16)" }])
 
-seed_rule!("DOC.COMPLEMENTARY.REFERENCE", title: "Nota complementar sem nota referenciada", scope: "document", severity: "error", effective_from: old, tags: %w[document],
+seed_rule!("DOC.COMPLEMENTARY.REFERENCE", title: "Nota complementar sem nota referenciada", scope: "document", severity: "warning", effective_from: old, tags: %w[document],
   applies_when: { "all" => [issuer, eq("doc.issuance.purpose", "complementary")] },
-  assert: { "some" => "doc.references", "as" => "r", "where" => present("r.access_key") },
-  message: "Nota complementar (finNFe=2) sem referência à nota original.")
+  assert: { "some" => "doc.references", "as" => "r", "where" => { "any" => [present("r.access_key"), present("r.nf_model_1")] } },
+  explanation: "A SEFAZ já rejeita finNFe=2 sem NFref (rejeição 322); num XML autorizado o achado costuma ser leitura nossa do grupo NFref — por isso warning. Aceita refNFe (NF-e) e refNF (modelo 1).",
+  legal_references: [{ "label" => "Ajuste SINIEF 07/05 (NFref)" }, { "label" => "MOC — rejeição 322" }],
+  message: "Nota complementar (finNFe=2) sem referência à nota original (refNFe/refNF).")
 
 seed_rule!("DOC.ISSUER.UF_SCENARIO", title: "UF do emitente diferente da UF do cenário", scope: "document", severity: "warning", effective_from: old, tags: %w[scenario],
   applies_when: { "all" => [issuer, present("doc.issuer.uf"), present("scenario.uf")] },
@@ -69,8 +75,9 @@ seed_rule!("CFOP.ST.SUBSTITUTED_CST", title: "CFOP de mercadoria com ST já reti
   group_by: ["item.product.cfop", "item.icms.situation_code"])
 
 seed_rule!("CFOP.ST.SUBSTITUTE_CST", title: "CFOP com retenção de ST exige CST/CSOSN de substituto", scope: "item", severity: "error", effective_from: old, tags: %w[cfop st icms],
-  applies_when: { "all" => [issuer, goods, outbound, eq("item.cfop_st_role", "substitute"), present("item.icms.taxation_kind")] },
+  applies_when: { "all" => [issuer, goods, outbound, eq("item.cfop_st_role", "substitute"), inn("item.cfop_nature", %w[sale transfer bonus]), present("item.icms.taxation_kind")] },
   assert: inn("item.icms.taxation_kind", with_st_kinds),
+  explanation: "Vale para a SAÍDA em que o emitente retém a ST (5.401/5.403/6.401/6.403 e equivalentes). A devolução de compra de mercadoria com ST (5.410/5.411/6.410/6.411) tem o mesmo papel na tabela, mas o substituído devolve com CST 60/CSOSN 500 ou repetindo o destaque da nota de compra, conforme a UF — por isso a regra não alcança CFOP de devolução.",
   message: "CFOP {{item.product.cfop}} (venda com retenção de ST) com CST/CSOSN {{item.icms.situation_code}}; esperado 10/30/70/90 ou CSOSN 201/202/203/900.",
   group_by: ["item.product.cfop", "item.icms.situation_code"])
 
@@ -87,27 +94,32 @@ seed_rule!("CFOP.OWN_PRODUCTION.INDUSTRY", title: "CFOP de produção própria e
   group_by: ["item.product.cfop"])
 
 # ------------------------------------------------------------------ ICMS
-seed_rule!("ICMS.RATE.INTERNAL", title: "Alíquota interna de ICMS × tabela da UF", scope: "item", severity: "error", effective_from: old, tags: %w[icms],
+seed_rule!("ICMS.RATE.INTERNAL", title: "Alíquota interna de ICMS × tabela da UF", scope: "item", severity: "warning", effective_from: old, tags: %w[icms],
   let: [{ "lookup" => "icms_internal_rate", "key" => [{ "ref" => "doc.operation.origin_uf" }, { "ref" => "item.product.ncm" }], "as" => "by_ncm" },
-        { "lookup" => "icms_internal_rate", "key" => [{ "ref" => "doc.operation.origin_uf" }, "*"], "as" => "general" }],
-  applies_when: { "all" => [issuer, normal_regime, goods, eq("doc.operation.scope", "intrastate"), inn("item.icms.taxation_kind", %w[taxed taxed_with_st]), present("item.icms.rate"),
-                            { "any" => [present("by_ncm"), present("general")] }, { "field" => "item.icms.base_reduction_pct", "op" => "absent" }] },
-  assert: { "if" => present("by_ncm"), "then" => approx("item.icms.rate", "by_ncm.rate", "0.001"), "else" => approx("item.icms.rate", "general.rate", "0.001") },
-  message: "Alíquota interna {{item.icms.rate}}% em {{doc.operation.origin_uf}} para NCM {{item.product.ncm}}; tabela indica {{by_ncm.rate}}{{general.rate}}%.",
+        { "lookup" => "icms_internal_rate", "key" => [{ "ref" => "doc.operation.origin_uf" }, "*"], "as" => "general" },
+        { "calc" => "coalesce(opt(by_ncm.rate), opt(general.rate))", "as" => "expected_rate" }],
+  applies_when: { "all" => [issuer, normal_icms, goods, eq("doc.operation.scope", "intrastate"), inn("item.icms.taxation_kind", %w[taxed taxed_with_st]), present("item.icms.rate"),
+                            present("expected_rate"), { "field" => "item.icms.base_reduction_pct", "op" => "absent" }] },
+  assert: approx("item.icms.rate", "expected_rate", "0.001"),
+  explanation: "Compara pICMS com a alíquota interna da UF: linha do NCM quando existe, senão a alíquota geral. A cobertura por NCM é parcial (DATA_SOURCES §1.6) — mercadoria com alíquota específica (cesta básica, energia, bebida, comunicação) ou com benefício da UF aparece como divergência sem estar errada, por isso warning. O FCP não entra: na NF-e 4.00 ele vai em pFCP, fora de pICMS (no RJ, 20% de ICMS + 2% de FCP).",
+  message: "Alíquota interna {{item.icms.rate}}% em {{doc.operation.origin_uf}} para o NCM {{item.product.ncm}}; a tabela indica {{expected_rate}}% (sem FCP).",
   group_by: ["item.icms.rate", "item.product.ncm"])
 
-seed_rule!("ICMS.EXEMPT.HIGHLIGHT", title: "CST de isenção/não incidência/suspensão com ICMS destacado", scope: "item", severity: "error", effective_from: old, tags: %w[icms],
+seed_rule!("ICMS.EXEMPT.HIGHLIGHT", title: "CST de isenção/não incidência/suspensão com ICMS destacado", scope: "item", severity: "warning", effective_from: old, tags: %w[icms],
+  explanation: "Os grupos ICMS40/41/50/60 e ICMSSN102/103/300/400/500 não têm campo de vICMS no leiaute e a SEFAZ rejeita o que estiver fora do schema: o achado só aparece em XML fora do padrão — por isso warning.",
   applies_when: { "all" => [issuer, inn("item.icms.taxation_kind", %w[exempt not_taxed suspended immune st_withheld]), present("item.icms.amount")] },
   assert: { "field" => "item.icms.amount", "op" => "lte", "value" => 0 },
   message: "CST/CSOSN {{item.icms.situation_code}} ({{item.icms.taxation_kind}}) com vICMS {{item.icms.amount}}: não pode haver destaque de ICMS próprio.",
   group_by: ["item.icms.situation_code"])
 
-seed_rule!("ICMS.REDUCED_BASE.PCT_REQUIRED", title: "CST de redução de base sem percentual de redução", scope: "item", severity: "error", effective_from: old, tags: %w[icms],
+seed_rule!("ICMS.REDUCED_BASE.PCT_REQUIRED", title: "CST de redução de base sem percentual de redução", scope: "item", severity: "warning", effective_from: old, tags: %w[icms],
   applies_when: { "all" => [issuer, inn("item.icms.cst", %w[20 70])] },
   assert: { "all" => [present("item.icms.base_reduction_pct"), gt("item.icms.base_reduction_pct", 0)] },
+  explanation: "pRedBC é opcional no schema (a UF pode aceitar a base já reduzida sem o percentual), mas sem ele não dá para conferir a base nem a escrituração. A SEFAZ não rejeita — o pedido é de qualidade do XML, daí warning.",
   message: "CST {{item.icms.cst}} (redução de base) sem pRedBC informado.")
 
-seed_rule!("ICMS.CST00.WITH_REDUCTION", title: "CST 00 com redução de base", scope: "item", severity: "error", effective_from: old, tags: %w[icms],
+seed_rule!("ICMS.CST00.WITH_REDUCTION", title: "CST 00 com redução de base", scope: "item", severity: "warning", effective_from: old, tags: %w[icms],
+  explanation: "O grupo ICMS00 não tem pRedBC no leiaute e a SEFAZ rejeita campo fora do schema: o achado só aparece em XML fora do padrão — por isso warning. O correto é CST 20 (ou 70 com ST).",
   applies_when: { "all" => [issuer, eq("item.icms.cst", "00"), present("item.icms.base_reduction_pct")] },
   assert: { "field" => "item.icms.base_reduction_pct", "op" => "lte", "value" => 0 },
   message: "CST 00 (tributada integralmente) com pRedBC {{item.icms.base_reduction_pct}}%; use CST 20.")
@@ -119,33 +131,33 @@ seed_rule!("ICMS.CST51.DEFERRAL_FIELDS", title: "CST 51 (diferimento) sem percen
 
 seed_rule!("ICMS.FCP.EXPECTED", title: "FCP não destacado em UF com adicional", scope: "item", severity: "warning", effective_from: Date.new(2016, 1, 1), tags: %w[icms fcp],
   let: [{ "lookup" => "icms_internal_rate", "key" => [{ "ref" => "doc.operation.origin_uf" }, "*"], "as" => "general" }],
-  applies_when: { "all" => [issuer, normal_regime, goods, eq("doc.operation.scope", "intrastate"), inn("item.icms.taxation_kind", %w[taxed reduced_base]), present("general.fcp_rate"), gt("general.fcp_rate", 0), gt("item.icms.amount", 0)] },
+  applies_when: { "all" => [issuer, normal_icms, goods, eq("doc.operation.scope", "intrastate"), inn("item.icms.taxation_kind", %w[taxed reduced_base]), present("general.fcp_rate"), gt("general.fcp_rate", 0), present("item.icms.amount"), gt("item.icms.amount", 0)] },
   assert: { "all" => [present("item.icms.fcp.rate"), gt("item.icms.fcp.rate", 0)] },
   message: "UF {{doc.operation.origin_uf}} tem FCP de {{general.fcp_rate}}% e o item não destaca FCP (pode ser correto se o NCM estiver fora do adicional).",
   group_by: ["item.product.ncm"])
 
 seed_rule!("ICMS.SIMPLES.CREDIT_RATE", title: "Alíquota de crédito do Simples (pCredSN) fora da faixa", scope: "item", severity: "warning", effective_from: old, tags: %w[icms simples_nacional],
-  applies_when: { "all" => [issuer, simples, inn("item.icms.csosn", %w[101 201 900]), present("item.icms.simples_credit.rate")] },
+  applies_when: { "all" => [issuer, simples_icms, inn("item.icms.csosn", %w[101 201 900]), present("item.icms.simples_credit.rate")] },
   assert: { "field" => "item.icms.simples_credit.rate", "op" => "between", "value" => ["1.25", "3.95"] },
   message: "pCredSN {{item.icms.simples_credit.rate}}% fora da faixa do Simples Nacional (1,25% a 3,95%).",
   legal_references: [{ "label" => "LC 123/2006, art. 23" }])
 
 seed_rule!("ICMS.SIMPLES.CREDIT_CALC", title: "Valor do crédito do Simples ≠ valor × pCredSN", scope: "item", severity: "warning", effective_from: old, tags: %w[icms simples_nacional],
   let: [{ "calc" => "round(item.net_amount * item.icms.simples_credit.rate / 100, 2)", "as" => "expected_credit" }, { "calc" => "round(item.product.gross_amount * item.icms.simples_credit.rate / 100, 2)", "as" => "expected_credit_gross" }],
-  applies_when: { "all" => [issuer, simples, present("item.icms.simples_credit.rate"), present("item.icms.simples_credit.amount"), present("item.net_amount")] },
+  applies_when: { "all" => [issuer, simples_icms, present("item.icms.simples_credit.rate"), present("item.icms.simples_credit.amount"), present("item.net_amount")] },
   assert: { "any" => [approx("item.icms.simples_credit.amount", "expected_credit", "0.05"), approx("item.icms.simples_credit.amount", "expected_credit_gross", "0.05")] },
   message: "vCredICMSSN {{item.icms.simples_credit.amount}} difere de valor × {{item.icms.simples_credit.rate}}% (≈ {{expected_credit}}).",
   legal_references: [{ "label" => "LC 123/2006 art. 23; Res. CGSN 140/2018 art. 60" }])
 
 seed_rule!("DOC.SIMPLES.CREDIT_TEXT", title: "CSOSN 101/201 (permite crédito) sem a expressão do art. 60 da Res. CGSN 140", scope: "document", severity: "warning", effective_from: old, tags: %w[simples_nacional document],
-  applies_when: { "all" => [issuer, simples, { "some" => "doc.items", "as" => "i", "where" => inn("i.icms.csosn", %w[101 201]) }] },
+  applies_when: { "all" => [issuer, simples_icms, { "some" => "doc.items", "as" => "i", "where" => inn("i.icms.csosn", %w[101 201]) }] },
   assert: { "any" => [{ "all" => [present("doc.additional_info.complementary"), { "field" => "doc.additional_info.complementary", "op" => "regex", "value" => "(?i)PERMITE\\s+O\\s+APROVEITAMENTO\\s+DO\\s+CR[EÉ]DITO" }] },
                       { "all" => [present("doc.additional_info.tax_authority"), { "field" => "doc.additional_info.tax_authority", "op" => "regex", "value" => "(?i)PERMITE\\s+O\\s+APROVEITAMENTO\\s+DO\\s+CR[EÉ]DITO" }] }] },
   message: "Nota com CSOSN 101/201 sem a expressão \"PERMITE O APROVEITAMENTO DO CRÉDITO DE ICMS NO VALOR DE R$…; CORRESPONDENTE À ALÍQUOTA DE …%\" nas informações complementares.",
   legal_references: [{ "label" => "Resolução CGSN 140/2018, art. 60" }])
 
 seed_rule!("ICMS.SIMPLES.CREDIT_TO_NON_TAXPAYER", title: "CSOSN 101/201 (com crédito) para não contribuinte", scope: "item", severity: "error", effective_from: old, tags: %w[icms simples_nacional],
-  applies_when: { "all" => [issuer, simples, inn("item.icms.csosn", %w[101 201]), present("doc.recipient.ie_indicator")] },
+  applies_when: { "all" => [issuer, simples_icms, inn("item.icms.csosn", %w[101 201]), present("doc.recipient.ie_indicator")] },
   assert: eq("doc.recipient.ie_indicator", "taxpayer"),
   message: "CSOSN {{item.icms.csosn}} permite crédito ao adquirente, mas o destinatário não é contribuinte (indIEDest {{doc.recipient.ie_indicator}}); use 102/202.")
 
@@ -162,10 +174,11 @@ seed_rule!("ICMS.ST.AMOUNT_CALC", title: "vICMSST ≠ base ST × alíquota − I
   message: "ICMS-ST {{item.icms_st.amount}} difere de {{item.icms_st.base_amount}} × {{item.icms_st.rate}}% − ICMS próprio = {{item.icms_st.expected_amount}}.")
 
 seed_rule!("ICMS.ST.WITHHELD_FIELDS", title: "CST 60 / CSOSN 500 sem valores da ST retida anteriormente", scope: "item", severity: "warning", effective_from: Date.new(2018, 1, 1), tags: %w[icms st],
-  applies_when: { "all" => [issuer, outbound, eq("item.icms.taxation_kind", "st_withheld"), inn("doc.recipient.ie_indicator", %w[taxpayer])] },
+  applies_when: { "all" => [issuer, outbound, eq("item.icms.taxation_kind", "st_withheld"), eq("doc.operation.final_consumer", false)] },
   assert: present("item.icms_st.withheld.amount"),
-  message: "CST 60/CSOSN 500 sem vBCSTRet/vICMSSTRet: informe a base e o ICMS retido anteriormente (exigido nas saídas a contribuinte).",
-  legal_references: [{ "label" => "NT 2018.005" }])
+  explanation: "A NT 2018.005 (rejeição 938) exige vBCSTRet/pST/vICMSSubstituto/vICMSSTRet quando indFinal = 0 — operação que ainda vai circular. Na venda a consumidor final (indFinal = 1) os campos são dispensados, mesmo que o destinatário seja contribuinte.",
+  message: "CST 60/CSOSN 500 sem vBCSTRet/vICMSSTRet: informe a base e o ICMS retido anteriormente (exigido quando indFinal = 0).",
+  legal_references: [{ "label" => "NT 2018.005 (rejeição 938)" }])
 
 seed_rule!("DIFAL.CALC", title: "Valor do DIFAL ≠ base × (alíquota interna destino − interestadual)", scope: "item", severity: "warning", effective_from: Date.new(2019, 1, 1), tags: %w[icms difal],
   explanation: "Fórmula de base única. UFs com base dupla (ex.: MG, PR, RS, SE…) calculam por dentro e o valor diverge — nesses casos confira antes de corrigir.",
@@ -181,16 +194,15 @@ seed_rule!("DIFAL.INTERSTATE_RATE", title: "Alíquota interestadual do DIFAL div
   message: "pICMSInter {{item.icms_uf_dest.interstate_rate}}% no grupo DIFAL; esperado {{expected.rate}}% para {{doc.operation.origin_uf}}→{{doc.operation.destination_uf}}.")
 
 seed_rule!("DIFAL.SIMPLES", title: "Optante do Simples destacando DIFAL (ICMSUFDest)", scope: "item", severity: "info", effective_from: Date.new(2016, 2, 17), tags: %w[icms difal simples_nacional],
-  applies_when: { "all" => [issuer, simples, eq("item.has_difal", true)] },
+  applies_when: { "all" => [issuer, simples_icms, eq("item.has_difal", true)] },
   assert: { "field" => "item.has_difal", "op" => "eq", "value" => false },
-  message: "Optante do Simples com grupo ICMSUFDest: a cobrança do DIFAL do Simples está suspensa (ADI 5464/STF); confira se há recolhimento indevido.",
-  legal_references: [{ "label" => "ADI 5464 (STF)" }])
+  explanation: "A cláusula nona do Convênio ICMS 93/2015, que estendia o DIFAL da EC 87/2015 aos optantes do Simples, está suspensa desde a cautelar da ADI 5464 (2016) e foi declarada inconstitucional no mérito; a LC 190/2022, que disciplinou o DIFAL após a ADI 5469/Tema 1093 (2021), não o instituiu para os optantes. O grupo ICMSUFDest numa nota de optante costuma indicar recolhimento indevido — informativo, porque algumas UFs ainda exigem por norma própria.",
+  message: "Optante do Simples com grupo ICMSUFDest: a cobrança do DIFAL do Simples está suspensa (ADI 5464); confira se há recolhimento indevido.",
+  legal_references: [{ "label" => "ADI 5464 (STF, cautelar 2016)" }, { "label" => "ADI 5469 / RE 1287019 — Tema 1093 (STF, 2021)" }, { "label" => "LC 190/2022" }])
 
-seed_rule!("ICMS.IMPORTED.ORIGIN_INTERSTATE", title: "Origem importada com alíquota interestadual ≠ 4%", scope: "item", severity: "error", effective_from: Date.new(2013, 1, 1), tags: %w[icms interstate],
-  applies_when: { "all" => [issuer, normal_regime, eq("doc.operation.scope", "interstate"), eq("item.icms.origin_category", "imported"), inn("item.icms.taxation_kind", %w[taxed taxed_with_st]), present("item.icms.rate")] },
-  assert: approx("item.icms.rate", "item.icms.rate", "0").merge("value" => "4.00", "tolerance" => "0.001"),
-  message: "Mercadoria de origem {{item.icms.origin}} (importada) em operação interestadual com alíquota {{item.icms.rate}}%; Resolução SF 13/2012 fixa 4%.",
-  legal_references: [{ "label" => "Resolução Senado 13/2012" }])
+# ICMS.IMPORTED.ORIGIN_INTERSTATE removida (09/09/2026): repetia ICMS.RATE.INTERSTATE (que já busca 4,00 na tabela para
+# origin_category = imported) sem as guardas de vigência (EC 87/2015) e de destinatário, gerando dois findings no mesmo item.
+retire_rule!("ICMS.IMPORTED.ORIGIN_INTERSTATE", "duplicava ICMS.RATE.INTERSTATE sem as guardas de 2016/não contribuinte", on: Date.new(2026, 9, 9))
 
 # ------------------------------------------------------------------ IPI
 seed_rule!("IPI.CST.DIRECTION", title: "CST de IPI de entrada em nota de saída (ou vice-versa)", scope: "item", severity: "error", effective_from: old, tags: %w[ipi],
@@ -206,14 +218,14 @@ seed_rule!("IPI.AMOUNT.CALC", title: "vIPI ≠ base × alíquota", scope: "item"
   message: "IPI {{item.ipi.amount}} difere de {{item.ipi.base_amount}} × {{item.ipi.rate}}% = {{item.ipi.expected_amount}}.")
 
 seed_rule!("IPI.SIMPLES.HIGHLIGHT", title: "Optante do Simples destacando IPI", scope: "item", severity: "error", effective_from: old, tags: %w[ipi simples_nacional],
-  applies_when: { "all" => [issuer, simples, present("item.ipi.amount")] },
+  applies_when: { "all" => [issuer, simples_federal, present("item.ipi.amount")] },
   assert: { "field" => "item.ipi.amount", "op" => "lte", "value" => 0 },
   message: "Optante do Simples com IPI destacado ({{item.ipi.amount}}); o IPI está incluído no DAS (CST 99 sem valor).",
   legal_references: [{ "label" => "LC 123/2006, art. 13" }])
 
 seed_rule!("IPI.RATE.TIPI", title: "Alíquota de IPI × TIPI", scope: "item", severity: "error", effective_from: old, tags: %w[ipi tipi],
   let: [{ "lookup" => "tipi", "key" => [{ "ref" => "item.product.ncm" }], "as" => "tipi" }],
-  applies_when: { "all" => [issuer, normal_regime, eq("scenario.ipi_taxpayer", true), eq("item.ipi.taxed", true), present("item.ipi.rate"), present("tipi"), present("tipi.rate"), { "field" => "item.product.ex_tipi", "op" => "absent" }] },
+  applies_when: { "all" => [issuer, normal_federal, eq("scenario.ipi_taxpayer", true), eq("item.ipi.taxed", true), present("item.ipi.rate"), present("tipi"), present("tipi.rate"), { "field" => "item.product.ex_tipi", "op" => "absent" }] },
   assert: approx("item.ipi.rate", "tipi.rate", "0.001"),
   message: "IPI {{item.ipi.rate}}% para NCM {{item.product.ncm}}; TIPI vigente indica {{tipi.rate}}%.",
   legal_references: [{ "label" => "Decreto 11.158/2022 (TIPI)" }], group_by: ["item.product.ncm", "item.ipi.rate"])
@@ -238,7 +250,7 @@ seed_rule!("PISCOFINS.AMOUNT.CALC", title: "vPIS/vCOFINS ≠ base × alíquota",
   message: "PIS {{item.pis.amount}} (esperado {{item.pis.expected_amount}}) / COFINS {{item.cofins.amount}} (esperado {{item.cofins.expected_amount}}).")
 
 seed_rule!("PISCOFINS.SIMPLES.HIGHLIGHT", title: "Optante do Simples destacando PIS/COFINS", scope: "item", severity: "error", effective_from: old, effective_until: Date.new(2026, 12, 31), tags: %w[pis cofins simples_nacional],
-  applies_when: { "all" => [issuer, simples, { "any" => [present("item.pis.amount"), present("item.cofins.amount")] }] },
+  applies_when: { "all" => [issuer, simples_federal, { "any" => [present("item.pis.amount"), present("item.cofins.amount")] }] },
   assert: { "all" => [{ "any" => [{ "field" => "item.pis.amount", "op" => "absent" }, { "field" => "item.pis.amount", "op" => "lte", "value" => 0 }] },
                       { "any" => [{ "field" => "item.cofins.amount", "op" => "absent" }, { "field" => "item.cofins.amount", "op" => "lte", "value" => 0 }] }] },
   message: "Optante do Simples com PIS/COFINS destacados (PIS {{item.pis.amount}}, COFINS {{item.cofins.amount}}); as contribuições estão no DAS.")
@@ -257,12 +269,14 @@ seed_rule!("CEST.MISMATCH", title: "CEST informado não corresponde ao NCM", sco
   message: "CEST {{item.product.cest}} não é compatível com o NCM {{item.product.ncm}} (esperado: {{item.expected_cest}}).",
   group_by: ["item.product.ncm", "item.product.cest"])
 
-seed_rule!("CEST.FORMAT", title: "CEST com formato inválido", scope: "item", severity: "error", effective_from: Date.new(2018, 1, 1), tags: %w[cest],
+seed_rule!("CEST.FORMAT", title: "CEST com formato inválido", scope: "item", severity: "warning", effective_from: Date.new(2018, 1, 1), tags: %w[cest],
+  explanation: "O schema da NF-e já exige 7 dígitos no CEST e a SEFAZ rejeita fora disso: num XML autorizado o achado indica leitura/conversão nossa — por isso warning.",
   applies_when: { "all" => [issuer, present("item.product.cest")] },
   assert: { "field" => "item.product.cest", "op" => "regex", "value" => "^\\d{7}$" },
   message: "CEST {{item.product.cest}} deve ter 7 dígitos.")
 
-seed_rule!("NCM.FORMAT", title: "NCM com formato inválido", scope: "item", severity: "error", effective_from: old, tags: %w[ncm],
+seed_rule!("NCM.FORMAT", title: "NCM com formato inválido", scope: "item", severity: "warning", effective_from: old, tags: %w[ncm],
+  explanation: "O schema da NF-e já exige NCM de 8 dígitos (ou \"00\" nos casos previstos) e a SEFAZ rejeita fora disso — por isso warning; NCM genérico em mercadoria é tratado por NCM.GENERIC.GOODS.",
   applies_when: { "all" => [issuer, goods, present("item.product.ncm")] },
   assert: { "field" => "item.product.ncm", "op" => "regex", "value" => "^(\\d{8}|00)$" },
   message: "NCM {{item.product.ncm}} inválido: use 8 dígitos (ou 00 apenas para serviços/itens sem mercadoria).")
@@ -286,7 +300,7 @@ seed_rule!("IBSCBS.CBS.AMOUNT_CALC", title: "vCBS ≠ base × alíquota efetiva"
 
 seed_rule!("IBSCBS.BASE.OPERATION_VALUE", title: "Base de IBS/CBS fora do intervalo do valor da operação", scope: "item", severity: "warning", effective_from: Date.new(2026, 1, 1), tags: %w[ibs_cbs reforma],
   let: [{ "calc" => "item.net_amount - coalesce(opt(item.icms.amount), 0) - coalesce(opt(item.pis.amount), 0) - coalesce(opt(item.cofins.amount), 0) - coalesce(opt(item.ipi.amount), 0)", "as" => "lower" },
-        { "calc" => "item.net_amount + coalesce(opt(item.ipi.amount), 0) * 0", "as" => "upper" }],
+        { "calc" => "item.net_amount", "as" => "upper" }],
   applies_when: { "all" => [issuer, eq("item.ibs_cbs.present", true), present("item.ibs_cbs.base_amount"), gt("item.ibs_cbs.base_amount", 0), present("item.net_amount"), inn("item.ibs_cbs.cst", %w[000 200 210])] },
   assert: { "all" => [{ "field" => "item.ibs_cbs.base_amount", "op" => "gte", "value" => { "calc" => "lower * 0.995" } }, { "field" => "item.ibs_cbs.base_amount", "op" => "lte", "value" => { "calc" => "upper * 1.005" } }] },
   message: "Base IBS/CBS {{item.ibs_cbs.base_amount}} fora do intervalo esperado ({{lower}} a {{upper}}): valor da operação sem IPI e descontos, podendo excluir ICMS/PIS/COFINS (LC 214 art. 12 §2).",
@@ -308,10 +322,9 @@ seed_rule!("IBSCBS.CLASS_CODE.FORMAT", title: "cClassTrib com formato inválido"
   assert: { "field" => "item.ibs_cbs.class_code", "op" => "regex", "value" => "^\\d{6}$" },
   message: "cClassTrib {{item.ibs_cbs.class_code}} deve ter 6 dígitos.")
 
-seed_rule!("IBSCBS.NFCE.GROUP", title: "NFC-e sem grupo IBS/CBS", scope: "item", severity: "error", effective_from: Date.new(2026, 8, 3), tags: %w[ibs_cbs reforma nfce],
-  applies_when: { "all" => [issuer, eq("doc.model", "65"), goods] },
-  assert: eq("item.ibs_cbs.present", true),
-  message: "NFC-e emitida após 03/08/2026 sem grupo IBS/CBS no item.")
+# IBSCBS.NFCE.GROUP removida (09/09/2026): IBSCBS.GROUP.REQUIRED v2 já cobre todo item de mercadoria (55 e 65) a partir
+# de 03/08/2026 — as duas geravam findings idênticos no mesmo item da NFC-e.
+retire_rule!("IBSCBS.NFCE.GROUP", "duplicava IBSCBS.GROUP.REQUIRED v2, que já alcança a NFC-e", on: Date.new(2026, 9, 9))
 
 # ------------------------------------------------------------------ Cross-document / eventos
 seed_rule!("DOC.NUMBERING.ORDER", title: "Numeração fora da ordem cronológica", scope: "cross_document", severity: "warning", effective_from: old, tags: %w[integrity],
@@ -327,7 +340,7 @@ seed_rule!("SCENARIO.REGIME.SIMPLES_VS_NORMAL", title: "Cenário Simples, mas as
   primitive: { "name" => "scenario_field_disagreement", "params" => { "field" => "tax_regime", "when_field_is" => "simples_nacional", "threshold" => "0.5", "evidence" => eq("doc.issuer.crt", "3") } },
   message: "{{share_pct}}% dos itens estão em notas com CRT 3 (regime normal), mas o cenário é Simples Nacional. O cliente mudou de regime?")
 
-seed_rule!("SCENARIO.REGIME.NORMAL_VS_SIMPLES", title: "Cenário Lucro Presumido/Real, mas as notas declaram Simples (CRT 1)", scope: "scenario", severity: "warning", effective_from: old, tags: %w[scenario regime],
+seed_rule!("SCENARIO.REGIME.NORMAL_VS_SIMPLES", title: "Cenário Lucro Presumido, mas as notas declaram Simples (CRT 1)", scope: "scenario", severity: "warning", effective_from: old, tags: %w[scenario regime],
   primitive: { "name" => "scenario_field_disagreement", "params" => { "field" => "tax_regime", "when_field_is" => "lucro_presumido", "threshold" => "0.5", "evidence" => inn("doc.issuer.crt", %w[1 2 4]) } },
   message: "{{share_pct}}% dos itens estão em notas com CRT de Simples Nacional, mas o cenário é Lucro Presumido.")
 
