@@ -31,13 +31,14 @@ Testes da API: `docker compose run --rm api bundle exec rspec`
 
 Leia nesta ordem: `docs/ARQUITETURA.md`, `docs/CANONICO.md`, `docs/DSL_RULES.md`, `docs/DATA_SOURCES.md`, `docs/DESIGN.md` (padrões de UI/UX).
 
-## Estado atual (29/08/2026)
+## Estado atual (09/09/2026)
 
 Fluxo ponta a ponta funcionando: upload de XML/ZIP → parse para o canônico → auditoria com regras versionadas → findings no painel.
 
 - Autenticação: JWT (Bearer) + refresh token com rotação; 2FA TOTP opcional; papéis `platform_admin | firm_admin | accountant`. O header `X-Client-Id` seleciona o cliente (sempre validado contra a firma do usuário).
-- Seeds (`bin/rails db:seed`) criam escritório, usuário `admin@fiscal.local` / `password123` (platform_admin), cliente `12345678000190`, 7 tabelas do Catalog e 30 regras.
+- Seeds (`bin/rails db:seed`) criam escritório, usuário `admin@fiscal.local` / `password123` (platform_admin), cliente `12345678000190`, o catálogo versionado no repositório e **94 regras ativas com 251 casos de teste** (catálogo completo em `docs/RULES.md`). Tabelas que dependem de importação (`ncm`, `tipi`, `cest`, `st_uf`, `ibs_cbs_class`, `pis_cofins_special`) nascem registradas **sem versão**: as regras que dependem delas viram `evaluation_error` até a importação — ver `docs/DATA_SOURCES.md` §2b.
 - Telas: Auditorias, Enviar XMLs, Clientes → Cenário tributário (com inferência a partir das notas), Usuários, Sobreposições (firma), Segurança (2FA/senha); para `platform_admin`: Regras (editor, casos de teste, ciclo de vida) e Tabelas (versões, import CSV/JSON, diff, publicação, sincronização NCM/cClassTrib).
 - Variáveis de produção: `JWT_SECRET`, `AR_ENCRYPTION_PRIMARY_KEY`, `AR_ENCRYPTION_DETERMINISTIC_KEY`, `AR_ENCRYPTION_KEY_DERIVATION_SALT`, `SVRS_CERT_P12`/`SVRS_CERT_PASSWORD` (opcional), `CORS_ORIGINS`.
 - Sidekiq Web em http://localhost:3000/sidekiq (apenas development).
-- Fixture de teste: `api/spec/fixtures/nfe/sale_return_csosn_102.xml` (devolução de venda com CSOSN 102 → dispara `ICMS.CSOSN.SALE_RETURN`).
+- Fixture de teste: `api/spec/fixtures/nfe/sale_return_csosn_102.xml` (devolução de venda no Simples, CSOSN 102 espelhando a original → dispara `DOC.RETURN.ORIGINAL_MISSING`, porque a nota de venda original não está na base).
+- Regressão: `docker compose run --rm api sh -c "bin/rails rules:validate && bin/rails rules:test && bundle exec rspec"`.

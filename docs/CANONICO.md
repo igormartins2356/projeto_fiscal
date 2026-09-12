@@ -19,6 +19,7 @@
 | Códigos | Strings, com zeros à esquerda preservados (`"0102"`, `"00"`, `"5102"`). |
 | Enumerações derivadas | Strings minúsculas em inglês (`"sale_return"`, `"interstate"`), exceto termos legais. Lista fechada por campo, versionada com o esquema. |
 | Origem | Todo campo derivado é marcado nesta doc com **[D]** e traz a regra de derivação na seção 8. Campos [D] que dependem de tabela do Catalog usam a versão vigente na `reference_date` do documento. |
+| Pendências | **[P]** = campo previsto no canônico e **ainda não produzido** (o parser não mapeia ou a derivação não existe). Fica na doc porque o desenho já o reserva, mas regra nenhuma pode contar com ele: na prática o caminho está sempre ausente. Ao implementar, tirar o [P]. |
 
 ---
 
@@ -36,10 +37,10 @@
 | `layout_groups` | string[] [D] | — | grupos opcionais presentes: `ibs_cbs`, `is`, `icms_uf_dest`, `payment`… |
 | `xml_hash` | string | — | SHA-256 do XML bruto (idempotência) |
 | `xml_ref` | string | — | caminho no storage |
-| `environment` | enum | `ide/tpAmb` | `production` \| `homologation` (homologação é rejeitada na ingestão, mas fica registrado) |
+| `environment` | enum | `ide/tpAmb` | `production` \| `homologation`; `tpAmb` ausente → chave ausente. Homologação e ambiente ausente são **pulados** na ingestão (`upload_batches.files_skipped` + motivo em `errors_log`) |
 | `monitored_cnpj` | string | — | CNPJ do cliente do escritório ao qual o documento pertence |
 | `role` [D] | enum | — | `issuer` \| `recipient` \| `third_party` (ver 8.1) |
-| `reference_date` [D] | date | — | data para seleção de vigência: `issuance.issued_at` em data local |
+| `reference_date` [D] | date | — | data para seleção de vigência: **data local** de `issuance.issued_at` (os 10 primeiros caracteres do `dhEmi`, preservando o offset da UF — nunca convertida para o fuso da aplicação). Documento sem `dhEmi` válido é recusado na ingestão |
 | `period` [D] | string | — | `"2026-03"` (competência) |
 
 ### 1.2 Identificação (`doc.issuance`, `doc.operation`)
@@ -53,7 +54,7 @@
 | `issuance.numeric_code` | string | `ide/cNF` | |
 | `issuance.emission_type` | enum | `ide/tpEmis` | `normal` \| `contingency_fsda` \| `epec` \| `svc_an` \| `svc_rs` \| `offline_nfce` … |
 | `issuance.purpose` | enum | `ide/finNFe` | `normal` \| `complementary` \| `adjustment` \| `return` |
-| `issuance.process` | enum | `ide/procEmi` | `taxpayer_app` \| `tax_authority_single` \| … |
+| `issuance.process` **[P]** | enum | `ide/procEmi` | `taxpayer_app` \| `tax_authority_single` \| … — `procEmi` ainda não é mapeado pelo parser |
 | `issuance.app_version` | string | `ide/verProc` | útil para agrupar erros por ERP |
 | `operation.nature_text` | string | `ide/natOp` | texto livre do ERP |
 | `operation.direction_declared` | enum | `ide/tpNF` | `inbound` \| `outbound` **do ponto de vista do emitente** |
@@ -83,10 +84,10 @@
 
 | Campo | Tipo | XML/Origem | Descrição |
 |---|---|---|---|
-| `status.state` [D] | enum | protocolo + eventos | `authorized` \| `cancelled` \| `denied` \| `rejected` \| `no_protocol` |
+| `status.state` [D] | enum | protocolo + eventos | `authorized` (cStat 100 e 150) \| `cancelled` \| `denied` \| `rejected` \| `no_protocol` |
 | `status.cancelled_at` [D] | datetime | evento 110111/110112 | |
-| `status.has_correction_letter` [D] | bool | evento 110110 | |
-| `status.manifestation` [D] | enum | eventos 2102xx | `awareness` \| `confirmed` \| `unknown` \| `not_performed` \| ausente |
+| `status.has_correction_letter` **[P]** | bool | evento 110110 | a CC-e é ingerida como documento `kind: event`, mas ainda não se projeta no `status` da nota alvo |
+| `status.manifestation` **[P]** | enum | eventos 2102xx | `awareness` \| `confirmed` \| `unknown` \| `not_performed` — idem: evento ingerido, projeção não implementada |
 | `protocol.number` | string | `protNFe/nProt` | |
 | `protocol.received_at` | datetime | `protNFe/dhRecbto` | |
 | `protocol.status_code` | string | `protNFe/cStat` | `"100"` autorizada, `"110"`/`"301"`/`"302"` denegada… |
@@ -130,9 +131,9 @@
 
 ### 2.3 Outros participantes (opcionais)
 
-- `doc.pickup`, `doc.delivery`: `{cnpj|cpf, address.*}` — `retirada/*`, `entrega/*`.
-- `doc.authorized_xml_parties[]`: `autXML/CNPJ|CPF`.
-- `doc.intermediary`: `{cnpj, identifier}` — `infIntermed/*`.
+- **[P]** `doc.pickup`, `doc.delivery`: `{cnpj|cpf, address.*}` — `retirada/*`, `entrega/*`.
+- **[P]** `doc.authorized_xml_parties[]`: `autXML/CNPJ|CPF`.
+- **[P]** `doc.intermediary`: `{cnpj, identifier}` — `infIntermed/*` (o indicador `ide/indIntermed` é mapeado em `operation.intermediary`; o grupo com CNPJ/identificador não).
 - `doc.technical_responsible`: `{cnpj, contact, email, phone}` — `infRespTec/*`. Útil para identificar o ERP emissor.
 
 ---
@@ -145,11 +146,11 @@
 |---|---|
 | `freight_mode` | `transp/modFrete` → `issuer_cif` (0), `recipient_fob` (1), `third_party` (2), `own_sender` (3), `own_recipient` (4), `no_freight` (9) |
 | `carrier.{cnpj|cpf, name, ie, address, city, uf}` | `transporta/*` |
-| `icms_withholding.{service_amount, base_amount, rate, amount, cfop, city_code}` | `retTransp/*` |
-| `vehicle.{plate, uf, rntc}` | `veicTransp/*` |
+| `icms_withholding.{service_amount, base_amount, rate, amount, cfop, city_code}` **[P]** | `retTransp/*` |
+| `vehicle.{plate, uf, rntc}` **[P]** | `veicTransp/*` |
 | `volumes[].{quantity, kind, brand, numbering, net_weight, gross_weight}` | `vol/*` |
 
-### 3.2 `doc.billing`
+### 3.2 `doc.billing` — **[P]** (grupo `cobr` ainda não mapeado)
 
 - `invoice.{number, original_amount, discount_amount, net_amount}` — `cobr/fat/*`
 - `installments[].{number, due_date, amount}` — `cobr/dup/*`
@@ -163,7 +164,7 @@
 | `method_description` | `detPag/xPag` |
 | `amount` | `detPag/vPag` |
 | `card.{integration_type, acquirer_cnpj, brand, authorization}` | `card/*` |
-| `doc.change_amount` | `pag/vTroco` |
+| `doc.change_amount` **[P]** | `pag/vTroco` |
 
 ---
 
@@ -191,7 +192,7 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `pis` / `cofins` | `vPIS` / `vCOFINS` |
 | `total` | `vNF` |
 | `approx_taxes` | `vTotTrib` |
-| `issqn.*` | `total/ISSQNtot/*` (se houver item de serviço) |
+| `issqn.*` **[P]** | `total/ISSQNtot/*` (se houver item de serviço) — fora de escopo de regras, ainda não mapeado |
 | `withholdings.{pis, cofins, csll, irrf, irrf_base, social_security_base, social_security}` | `total/retTrib/*` |
 | `ibs_cbs.*` | `total/IBSCBSTot/*` — ver 5.9 |
 | **Derivados** | |
@@ -226,10 +227,10 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `product.purchase_order` / `product.purchase_order_item` | string / int | `xPed` / `nItemPed` |
 | `product.fci` | string | `prod/nFCI` |
 | `product.used_movable_good` | bool | `prod/indBemMovelUsado` (NT 2025.002) |
-| `product.batches[]` | obj[] | `prod/rastro/*` (lot, quantity, manufactured_on, expires_on) |
-| `product.specific_detail` | obj | `veicProd` \| `med` \| `arma` \| `comb` \| … com `kind` |
-| `product.import_declarations[]` | obj[] | `prod/DI/*` |
-| `product.export_detail` | obj | `prod/detExport/*` |
+| `product.batches[]` **[P]** | obj[] | `prod/rastro/*` (lot, quantity, manufactured_on, expires_on) |
+| `product.specific_detail` **[P]** | obj | `veicProd` \| `med` \| `arma` \| `comb` \| … com `kind` |
+| `product.import_declarations[]` **[P]** | obj[] | `prod/DI/*` |
+| `product.export_detail` **[P]** | obj | `prod/detExport/*` |
 | `item.additional_info` | string | `det/infAdProd` |
 | `item.approx_taxes` | decimal | `imposto/vTotTrib` |
 
@@ -238,15 +239,20 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | Campo | Descrição |
 |---|---|
 | `item.net_amount` | `gross_amount - discount + freight + insurance + other_expenses` |
-| `item.cfop_nature` | natureza do CFOP pela tabela `cfop` do Catalog (`sale`, `sale_return`, …) |
+| `item.cfop_nature` | natureza do CFOP pela tabela `cfop` do Catalog (`sale`, `sale_return`, …); CFOP fora da tabela → `"unknown"` |
+| `item.cfop_known` | CFOP existe na tabela `cfop` vigente |
+| `item.cfop_st_role` | papel do CFOP na ST pela tabela `cfop`: `substitute` (retém) \| `substituted` (ST já retida) \| `st_other` (operação com ST em que o CST correto depende do caso: 5.402 entre substitutos do mesmo produto, 5.408/5.409 transferência, 5.414/5.415 remessa para venda fora do estabelecimento — nenhuma regra de ST julga) \| `none` (fora da tabela → `"unknown"`) |
+| `item.cfop_requires_reference` | CFOP exige documento referenciado (devolução, complementar); só gravado quando a linha existe |
+| `item.cfop_own_production` | CFOP de saída de produção do estabelecimento; só gravado quando a linha existe |
 | `item.cfop_group` | primeiro dígito: `inbound_intrastate` (1), `inbound_interstate` (2), `inbound_foreign` (3), `outbound_intrastate` (5), `outbound_interstate` (6), `outbound_foreign` (7) |
 | `item.cfop_scope` | `intrastate` \| `interstate` \| `foreign` (a partir de `cfop_group`) |
 | `item.ncm_valid` | NCM existe na tabela `ncm` vigente na `reference_date` |
 | `item.ncm_chapter` | 2 primeiros dígitos |
 | `item.ncm_generic` | `"00000000"` ou `"00"` |
 | `item.expected_cest` | CEST(s) para o NCM na tabela `cest` (pode ser lista) |
-| `item.st_applicable_by_catalog` | NCM/CEST está no regime de ST da `destination_uf` (tabela `st_uf`), antes de overrides de cenário |
+| `item.st_applicable_by_catalog` | NCM/CEST está no regime de ST da `destination_uf` (tabela `st_uf`, busca por NCM → NCM de 4 dígitos → CEST do item), antes de overrides de cenário; ausente quando a UF não tem curadoria |
 | `item.is_service` | grupo `ISSQN` presente |
+| `item.has_difal` | grupo `ICMSUFDest` presente (ver 5.4) |
 
 ### 5.2 ICMS (`item.icms`) — `imposto/ICMS/ICMSxx`
 
@@ -254,7 +260,7 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 |---|---|---|---|
 | `group` | string | nome do elemento | `ICMS00`, `ICMS10`, `ICMS20`, `ICMS30`, `ICMS40`, `ICMS51`, `ICMS60`, `ICMS70`, `ICMS90`, `ICMSPart`, `ICMSST`, `ICMSSN101`… `ICMSSN900` |
 | `origin` | string(1) | `orig` | `0`–`8` |
-| `origin_category` [D] | enum | — | `domestic` (0,3,4,5,8) \| `imported` (1,2,6,7) — 3/5/8 têm regras próprias de conteúdo de importação |
+| `origin_category` [D] | enum | — | chave da alíquota interestadual de 4% da **Res. SF 13/2012**: `imported` para origem `1, 2, 3, 8`; `domestic` para `0, 4, 5, 6, 7`. O nome engana: origens 6 e 7 (bem importado/com conteúdo importado **sem similar nacional**, lista CAMEX) são estrangeiras e mesmo assim saem como `domestic`, porque estão fora da Res. 13/2012 e seguem 7%/12% |
 | `cst` | string(2) | `CST` | presente só em regime normal |
 | `csosn` | string(3) | `CSOSN` | presente só no Simples |
 | `situation_code` [D] | string | — | `cst` ou `csosn`, o que existir |
@@ -268,7 +274,7 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `exemption.{amount, reason_code, deducts}` | | `vICMSDeson`, `motDesICMS`, `indDeduzDeson` | |
 | `deferral.{pct, operation_amount, deferred_amount}` | | `pDif`, `vICMSOp`, `vICMSDif` | ICMS51 |
 | `simples_credit.{rate, amount}` | | `pCredSN`, `vCredICMSSN` | CSOSN 101/201/900 |
-| `expected_base_amount` [D] | decimal | — | `item.net_amount × (1 - base_reduction_pct/100)` |
+| `expected_base_amount` [D] | decimal | — | `(item.net_amount + IPI) × (1 - base_reduction_pct/100)`, só quando `base_mode` existe. O IPI entra na base **apenas** em operação a consumidor final / não contribuinte (LC 87/96 art. 13 §2, a contrario: na venda a contribuinte para industrialização ou comercialização o IPI fica fora) |
 | `expected_base_reliable` [D] | bool | — | `false` quando `base_mode` ≠ 3 (pauta/MVA não deriva de valor) |
 | `expected_amount` [D] | decimal | — | `base_amount × rate / 100` |
 | `taxation_kind` [D] | enum | — | classificação do CST/CSOSN pela tabela `cst_icms`/`csosn` do Catalog: `taxed`, `taxed_with_st`, `reduced_base`, `exempt`, `not_taxed`, `suspended`, `deferred`, `st_withheld`, `simples_with_credit`, `simples_without_credit`, `other`… |
@@ -286,9 +292,11 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `withheld.{base_amount, final_consumer_rate, amount, substitute_amount}` | `vBCSTRet` / `pST` / `vICMSSTRet` / `vICMSSubstituto` (CST 60 / CSOSN 500) |
 | `withheld.fcp.{base_amount, rate, amount}` | `vBCFCPSTRet` / `pFCPSTRet` / `vFCPSTRet` |
 | `exemption.{amount, reason_code}` | `vICMSSTDeson` / `motDesICMSST` |
-| `st_uf` / `st_uf_base_pct` / `st_uf_amount` | `UFST` / `pBCOp` / … (ICMSPart) |
+| `st_uf` / `st_uf_base_pct` / `st_uf_amount` **[P]** | `UFST` / `pBCOp` / … (grupo `ICMSPart`, ainda não mapeado) |
 | `highlights_st` [D] | `amount > 0` |
 | `has_withheld_st` [D] | `withheld.amount` presente |
+| `expected_base_amount` [D] | `(item.net_amount + IPI) × (1 + mva_pct/100) × (1 - base_reduction_pct/100)`, só quando há `mva_pct` e `base_mode = 4` (MVA) |
+| `expected_amount` [D] | `base_amount × rate/100 − ICMS próprio destacado` (LC 87/96 art. 8º §5). **Não é derivado quando o item usa CSOSN**: o substituto optante do Simples não destaca ICMS próprio na nota e deduz a alíquota que *seria* devida (Conv. ICMS 35/2011), valor que não está no XML — tratar a ausência como zero inflava o esperado e apontava erro em ST correta |
 
 ### 5.4 DIFAL / partilha (`item.icms_uf_dest`) — `imposto/ICMSUFDest`
 
@@ -300,6 +308,7 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `interstate_rate` | `pICMSInter` |
 | `sharing_pct` | `pICMSInterPart` |
 | `destination_amount` / `sender_amount` | `vICMSUFDest` / `vICMSUFRemet` |
+| `expected_destination_amount` [D] | `base_amount × (destination_internal_rate − interstate_rate) / 100` (EC 87/2015, partilha integral ao destino desde 2019) |
 | `item.has_difal` [D] | grupo presente |
 
 ### 5.5 IPI (`item.ipi`) — `imposto/IPI`
@@ -312,8 +321,10 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `base_amount` / `rate` / `amount` | `vBC` / `pIPI` / `vIPI` |
 | `quantity` / `unit_amount` | `qUnid` / `vUnid` (alíquota específica) |
 | `expected_amount` [D] | `base_amount × rate / 100` |
+| `cst_direction` [D] | `inbound` \| `outbound` pela tabela `cst_ipi` (Tabela 4.3.2 do SPED: 00–49 entrada, 50–99 saída) |
+| `taxation_kind` [D] | `taxed`, `exempt`, `not_taxed`, `immune`, `suspended`, `other` pela tabela `cst_ipi` |
 
-### 5.6 II (`item.ii`)
+### 5.6 II (`item.ii`) — **[P]** (grupo `imposto/II` ainda não mapeado)
 
 `base_amount, customs_expenses, amount, iof` — `vBC, vDespAdu, vII, vIOF`.
 
@@ -327,11 +338,14 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `base_quantity` / `unit_rate` | `qBCProd` / `vAliqProd` |
 | `expected_amount` [D] | `base_amount × rate/100` ou `base_quantity × unit_rate` |
 | `taxation_kind` [D] | pela tabela `cst_pis_cofins`: `taxed`, `single_phase`, `zero_rate`, `exempt`, `no_incidence`, `suspended`, `other`, `st` |
+| `cst_direction` [D] | pela tabela `cst_pis_cofins` (Tabela 4.3.3 do SPED): CST 01–49 → `outbound`, 50–99 → `inbound`; CST fora da tabela → `"unknown"` |
 | `*_st.{base_amount, rate, amount, base_quantity, unit_rate, add_to_total}` | `PISST/*`, `COFINSST/*` (`indSomaPISST`) |
 
 ### 5.8 ISSQN (`item.issqn`) — apenas para registro; fora de escopo de regras
 
-`base_amount, rate, amount, taxable_event_city_code, service_list_item, unconditional_discount, conditional_discount, withholding, iss_indicator, service_code, incidence_city_code, country_code, process_number, tax_incentive`.
+O parser grava só a **presença** do grupo: `issqn.present = true` (é o que sustenta o derivado `item.is_service`).
+
+**[P]** os campos do grupo: `base_amount, rate, amount, taxable_event_city_code, service_list_item, unconditional_discount, conditional_discount, withholding, iss_indicator, service_code, incidence_city_code, country_code, process_number, tax_incentive`.
 
 ### 5.9 IBS / CBS / IS (`item.ibs_cbs`, `item.is`) — NT 2025.002 (grupos `IBSCBS`, `IS`)
 
@@ -349,16 +363,16 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 | `ibs_cbs.cbs.{rate, deferral_pct, deferral_amount, refund_amount, reduction_pct, effective_rate, amount}` | `gCBS/*` | |
 | `ibs_cbs.regular_taxation.{cst, class_code, ibs_uf_rate, ibs_city_rate, cbs_rate, ibs_uf_amount, ibs_city_amount, cbs_amount}` | `gTribRegular/*` | "quanto seria" sem o benefício |
 | `ibs_cbs.presumed_credit.{ibs: {code, pct, amount}, cbs: {code, pct, amount}}` | `gIBSCredPres`, `gCBSCredPres` | |
-| `ibs_cbs.single_phase.{…}` | `gIBSCBSMono/*` | combustíveis |
-| `ibs_cbs.government_purchase.{…}` | `gCompraGov` | |
-| `ibs_cbs.ibs.expected_amount` [D] / `ibs_cbs.cbs.expected_amount` [D] | — | `base_amount × effective_rate/100` |
-| `ibs_cbs.schedule_rates.{ibs_uf, ibs_city, cbs}` [D] | — | alíquotas da tabela `ibs_cbs_schedule` vigentes na `reference_date` |
+| `ibs_cbs.single_phase.present` | `gIBSCBSMono` | combustíveis; o parser grava só `{present: true}` — os campos do grupo são **[P]** |
+| `ibs_cbs.government_purchase.{…}` **[P]** | `gCompraGov` | |
+| `ibs_cbs.cbs.expected_amount` [D] / `ibs_cbs.ibs_uf.expected_amount` [D] / `ibs_cbs.ibs_city.expected_amount` [D] | — | `base_amount × effective_rate/100`, por grupo que tenha `effective_rate`. **Não existe `ibs_cbs.ibs.expected_amount`**: `ibs` carrega só o `vIBS` do XML (soma UF + município) |
+| `ibs_cbs.schedule_rates.{ibs_uf, ibs_city, cbs}` [D] | — | alíquotas da tabela `ibs_cbs_schedule` pelo **ano** da `reference_date`; grupo ausente quando o ano não está na tabela |
 | `is.{cst, class_code, base_amount, rate, specific_rate, quantity, unit, amount}` | `IS/*` (`CSTIS, cClassTribIS, vBCIS, pIS, pISEspec, qTrib, uTrib, vIS`) | Imposto Seletivo |
 | `doc.totals.ibs_cbs.{base_amount, ibs_uf, ibs_city, ibs, cbs, presumed_credit_ibs, presumed_credit_cbs, is}` | `IBSCBSTot/*` | totais |
 | `doc.ibs_cbs.taxable_event_city_code` | `ide/cMunFGIBS` | |
 | `doc.ibs_cbs.debit_note_type` / `credit_note_type` | `ide/tpNFDebito` / `ide/tpNFCredito` | |
-| `doc.ibs_cbs.prepayments[]` | `gPagAntecipado/refNFe` | |
-| `item.ibs_cbs.return_references[]` | `refNFe` do item quando a NT exigir | |
+| `doc.ibs_cbs.prepayments[]` **[P]** | `gPagAntecipado/refNFe` | |
+| `item.ibs_cbs.return_references[]` **[P]** | `refNFe` do item quando a NT exigir | |
 
 ---
 
@@ -366,11 +380,11 @@ Todos `decimal`. Fonte `total/ICMSTot/*` salvo indicação.
 
 - `tax_authority`: `infAdic/infAdFisco`
 - `complementary`: `infAdic/infCpl`
-- `taxpayer_notes[]`: `obsCont/{field, text}`
-- `tax_authority_notes[]`: `obsFisco/{field, text}`
-- `referenced_processes[]`: `procRef/{number, origin}`
-- `export.{shipping_uf, shipping_place, dispatch_place}`: `exporta/*`
-- `purchase.{commitment_note, order, contract}`: `compra/*`
+- **[P]** `taxpayer_notes[]`: `obsCont/{field, text}`
+- **[P]** `tax_authority_notes[]`: `obsFisco/{field, text}`
+- **[P]** `referenced_processes[]`: `procRef/{number, origin}`
+- **[P]** `export.{shipping_uf, shipping_place, dispatch_place}`: `exporta/*`
+- **[P]** `purchase.{commitment_note, order, contract}`: `compra/*`
 
 ---
 
@@ -398,10 +412,12 @@ Eventos são documentos próprios (`kind: event`) **e** projetam-se no `doc.stat
 
 ## 8. Regras de derivação
 
-Derivação roda **na normalização** e é re-executável (`Document#rederive!`) quando muda tabela do Catalog ou chegam eventos/referências. Derivados que dependem do Catalog guardam `catalog_versions` usadas.
+Derivação roda **na normalização** e é re-executável (`Ingestion::Rederive`, via `Ingestion::RederiveJob` ou `rake 'ingestion:rederive[client_id,period]'`) quando muda tabela do Catalog ou chegam eventos/referências; a rederivação reexecuta também o `ReferenceResolver`. Derivados que dependem do Catalog guardam em `documents.catalog_versions` as versões usadas.
+
+**Tabela indisponível ≠ "não"**: derivado que depende de tabela do Catalog só é gravado quando existe versão publicada vigente na `reference_date`; sem versão, a chave fica **ausente** ("não sei") e a regra que dependia dela simplesmente não se aplica. Com a tabela disponível e o código inexistente nela, os enums ficam `"unknown"` (e `cfop_known = false`), enquanto os booleanos derivados da linha (`cfop_requires_reference`, `cfop_own_production`) ficam ausentes.
 
 **8.1 `doc.role`**
-`issuer` se `issuer.cnpj == monitored_cnpj`; `recipient` se `recipient.cnpj == monitored_cnpj`; senão `third_party` (aceito só se o escritório enviar explicitamente; gera alerta na ingestão).
+`issuer` se `issuer.cnpj == monitored_cnpj`; `recipient` se `recipient.cnpj == monitored_cnpj`; senão `third_party` — documento de terceiro não é importado: entra em `upload_batches.files_skipped` com o motivo em `errors_log`.
 
 **8.2 `doc.operation.direction`**
 `role = issuer` → `direction = direction_declared`. `role = recipient` → inverte (`outbound` do emitente é `inbound` para nós). Nota de entrada emitida por nós (`direction_declared = inbound`, ex.: devolução de cliente PF) mantém `inbound`.
@@ -416,18 +432,20 @@ Derivação roda **na normalização** e é re-executável (`Document#rederive!`
 
 **8.5 Derivados de item**
 - `net_amount = gross_amount - discount + freight + insurance + other_expenses`.
-- `cfop_nature`, `cfop_group`, `cfop_scope`: tabela `cfop` vigente.
-- `ncm_valid`, `expected_cest`, `st_applicable_by_catalog`: tabelas `ncm`, `cest`, `st_uf` vigentes na `reference_date`, usando `operation.destination_uf` (ou `origin_uf` em entradas).
-- `icms.expected_base_amount = net_amount × (1 - base_reduction_pct/100)`; `expected_base_reliable = false` quando `base_mode` ≠ 3.
-- `*.expected_amount = base_amount × rate/100` (`ROUND_HALF_UP`, 2 casas). A tolerância é parâmetro da regra.
-- `icms.taxation_kind`, `pis.taxation_kind`: tabelas `cst_icms`/`csosn`/`cst_pis_cofins`.
+- `cfop_group` e `cfop_scope` saem do primeiro dígito (não dependem de tabela); `cfop_nature`, `cfop_known`, `cfop_st_role`, `cfop_requires_reference`, `cfop_own_production`: tabela `cfop` vigente.
+- `ncm_valid`, `expected_cest`, `st_applicable_by_catalog`: tabelas `ncm`, `cest`, `st_uf` vigentes na `reference_date`. O `st_uf` é consultado por `[destination_uf, NCM]`, depois `[destination_uf, NCM de 4 dígitos]`, depois `[destination_uf, CEST do item]`; sem `destination_uf`, pela UF do emitente. Sem linha, o derivado fica ausente (a UF pode simplesmente não estar curada).
+- `icms.expected_base_amount = (net_amount + IPI a consumidor final) × (1 - base_reduction_pct/100)` (LC 87/96 art. 13 §2); `expected_base_reliable = false` quando `base_mode` ≠ 3 (pauta/MVA/preço tabelado não derivam do valor da operação).
+- `*.expected_amount = base_amount × rate/100` (`ROUND_HALF_UP`, 2 casas). A tolerância é parâmetro da regra. Exceção: `icms_st.expected_amount` deduz o ICMS próprio destacado e **não é derivado** em item com CSOSN (5.3).
+- `icms.taxation_kind`, `pis`/`cofins.taxation_kind` e `cst_direction`, `ipi.taxation_kind` e `cst_direction`: tabelas `cst_icms`/`csosn`/`cst_pis_cofins`/`cst_ipi`.
 - `ibs_cbs.schedule_rates`: tabela `ibs_cbs_schedule` por ano de `reference_date` (+ UF/município quando a tabela tiver).
 
+> Alíquota interna do Catalog (`icms_internal_rate`): a coluna `rate` é a alíquota do ICMS **sem** o FCP, que fica em `fcp_rate` — o adicional de fundo de combate à pobreza é destacado à parte no XML (`pFCP`/`vFCP`), e somá-lo à alíquota apontaria erro em nota correta.
+
 **8.6 `doc.status`**
-Base pelo `protocol.status_code` (`100` → `authorized`; `110/301/302/303` → `denied`; ausente → `no_protocol`). Evento 110111/110112 autorizado → `cancelled`. Recalculado a cada evento ingerido.
+Base pelo `protocol.status_code` (`100` e `150` → `authorized` — 150 é "autorizada fora de prazo", nota válida; `110/301/302/303` → `denied`; qualquer outro código → `rejected`; ausente → `no_protocol`). Evento 110111/110112 autorizado → `cancelled`. Recalculado a cada evento ingerido.
 
 **8.7 `doc.references[].resolved`**
-Busca pela chave dentro do mesmo `monitored_cnpj`. Recalculado quando o documento referenciado chega depois.
+Busca pela chave dentro do mesmo `monitored_cnpj` (`Ingestion::ReferenceResolver`, nos dois sentidos). Recalculado quando o documento referenciado chega depois e a cada rederivação — a derivação em si nunca sobrescreve um `resolved` já existente.
 
 ---
 
@@ -453,13 +471,15 @@ record:      {line_number, block, record_type ("C100"), fields: {FIELD_NAME: val
 
 | Escopo | Variáveis disponíveis |
 |---|---|
-| `item` | `item`, `doc`, `scenario`, `catalog.lookup(...)` |
-| `document` | `doc` (com `doc.items[]`), `scenario`, `catalog` |
-| `cross_document` | `period.documents[]`, `period.invalidations[]`, `scenario`, `catalog` |
-| `period` | `period.*`, `fiscal_file` (records), `scenario`, `catalog` |
-| `scenario` | `period.documents[]`, `scenario`, estatísticas prontas (`stats.distribution(field)`) |
+| `item` | `item`, `doc`, `scenario`, `params`, `let` (`lookup`/`calc`/`ref`) |
+| `document` | `doc` (com `doc.items[]`), `scenario`, `params`, `let` |
+| `cross_document` | `period.{documents[], events[], invalidations[]}`, `scenario`, `params` |
+| `period` | `period.*` **e** `fiscal_file` (registros da EFD), `scenario`, `params` |
+| `scenario` | `period.*`, `scenario`, `stats` (estatísticas prontas), `params` |
 
-`scenario` é o **cenário resolvido** para `doc.reference_date`: `tax_regime, uf, ipi_taxpayer, icms_taxpayer, activity, predominant_final_consumer, st.{source, overrides}, benefits[], rate_overrides[], disabled_rules[]` — modelagem detalhada em `DSL_RULES.md`.
+O catálogo não é um caminho do contexto: a regra consulta tabela por `let: [{"lookup": …}]`, que devolve a linha vigente na `reference_date` como variável (`DSL_RULES.md` §3.4).
+
+`scenario` é o **cenário resolvido** do cliente para a data do documento (`Scenario::TaxScenario.resolve`): `tax_regime, simples_annex, uf, city_code, icms_taxpayer, ipi_taxpayer, iss_taxpayer, activity[], cnae, sells_to_final_consumer, uses_nfce, exports, imports, st.{source, applies, overrides[]}, benefits[], pis_cofins.regime, ibs_cbs.regime` — modelagem detalhada em `DSL_RULES.md` §7. Cliente sem cenário publicado na data: as regras que leem `scenario.*` não são avaliadas e o run registra um `evaluation_error` explicando (nunca um finding).
 
 ---
 
@@ -494,11 +514,11 @@ record:      {line_number, block, record_type ("C100"), fields: {FIELD_NAME: val
     "pis": {"group": "PISOutr", "cst": "49", "taxation_kind": "other"},
     "cofins": {"group": "COFINSOutr", "cst": "49", "taxation_kind": "other"},
     "ibs_cbs": {"present": true, "cst": "000", "class_code": "000001", "base_amount": "1000.00",
-                "cbs": {"rate": "0.90", "amount": "9.00", "expected_amount": "9.00"},
-                "ibs": {"amount": "1.00", "expected_amount": "1.00"},
+                "cbs": {"rate": "0.90", "effective_rate": "0.90", "amount": "9.00", "expected_amount": "9.00"},
+                "ibs": {"amount": "1.00"},
                 "schedule_rates": {"cbs": "0.90", "ibs_uf": "0.10", "ibs_city": "0.00"}}
   }]
 }
 ```
 
-Neste exemplo a regra `ICMS.CSOSN.SALE_RETURN` dispara (`csosn 102` em `sale_return` no Simples → esperado `900`), e a regra de referência de devolução passa (`references[0].resolved = true`).
+Neste exemplo nenhuma regra de CSOSN dispara: devolução de venda emitida pelo próprio optante **espelha** a nota original (mesmo CSOSN 102, sem destaque) — quem confere isso é `DOC.RETURN.MIRROR`, e o 900 seria devolução de *compra* (ver `RULES_REVIEW.md`). A regra de referência de devolução (`DOC.RETURN.REFERENCE`) também passa, porque `references[0].resolved = true`.

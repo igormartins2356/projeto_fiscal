@@ -25,4 +25,4 @@ Mudança pequena pode ser feita direto, mas termina com `code-reviewer`. Não h�
 
 ## Ambiente
 
-Docker Compose na raiz (`docker compose up -d`; Postgres 5434, API 3000, web 5174). Login dev: `admin@fiscal.local` / `password123`. Clientes de teste: Boiron (id 54, XMLs jul–ago/2026), Victor Dzenk (id 55, cross-check SPED).
+Docker Compose na raiz (`docker compose up -d`; Postgres 5434, API 3000, web 5174). Login dev: `admin@fiscal.local` / `password123`. Clientes de teste do banco local (ids valem só nesta máquina; identifique pelo CNPJ): Boiron (id 54, XMLs jul–ago/2026), Victor Dzenk (id 55, CNPJ 66412974000190, cross-check SPED).

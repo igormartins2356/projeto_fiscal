@@ -66,38 +66,40 @@ Três opções avaliadas:
 
 **Decisão: C.** A distinção rígida é:
 
-- **Primitiva (código):** sabe *como* comparar. Ex.: `items_sum_matches_totals`, `duplicate_document`, `return_references_original`, `table_lookup`, `numbering_gap`. Não sabe *nenhum* valor fiscal.
-- **Regra (dado):** sabe *o que* é certo e *quando*. Ex.: "CSOSN esperado para devolução de venda no Simples é 900".
+- **Primitiva (código):** sabe *como* comparar. Ex.: `items_sum_matches_totals`, `duplicate_document`, `return_references_original`, `numbering_gap`, `sped_document_reconciliation` (lista completa em `DSL_RULES.md` §6). Não sabe *nenhum* valor fiscal — até os COD_SIT e modelos que a conciliação da EFD compara vêm da regra.
+- **Regra (dado):** sabe *o que* é certo e *quando*. Ex.: "cancelamento fora do prazo de 24h", "CFOP de devolução aceito para cada CFOP de venda".
 
 ### 3.1 Anatomia de uma regra
 
 ```jsonc
 {
-  "code": "ICMS.CSOSN.SALE_RETURN",                // estável entre versões
-  "version": 3,
-  "effective_from": "2024-01-01", "effective_until": null,
+  "code": "ICMS.REGIME.SITUATION_FIELD",           // estável entre versões
+  "version": 1,
+  "effective_from": "2010-01-01", "effective_until": null,
   "scope": "item",                                 // item | document | cross_document | period | scenario
   "applies_when": {                                // filtro — quem a regra alcança
     "all": [
       {"field": "doc.role", "op": "eq", "value": "issuer"},
-      {"field": "scenario.tax_regime", "op": "eq", "value": "simples_nacional"},
-      {"field": "doc.operation.nature", "op": "eq", "value": "sale_return"}
+      {"field": "item.is_service", "op": "eq", "value": false},
+      {"field": "item.icms.situation_field", "op": "neq", "value": "absent"}
     ]
   },
   "assert": {                                      // o que tem que ser verdade
-    "field": "item.icms.csosn", "op": "eq", "value": "900"
+    "if": {"field": "scenario.tax_regime", "op": "in", "value": ["simples_nacional", "mei"]},
+    "then": {"field": "item.icms.situation_field", "op": "eq", "value": "csosn"},
+    "else": {"field": "item.icms.situation_field", "op": "eq", "value": "cst"}
   },
   "severity": "error",                             // error | warning | info
-  "message": "Devolução de venda no Simples deve usar CSOSN 900; encontrado {{item.icms.csosn}}.",
+  "message": "Item usa {{item.icms.situation_field}} ({{item.icms.situation_code}}), incompatível com o regime {{scenario.tax_regime}} do cenário.",
   "explanation": "...texto para contador...",
-  "legal_references": ["RICMS/xx art. ...", "Ajuste SINIEF 07/05 Anexo ..."],
+  "legal_references": [{"label": "LC 123/2006, arts. 19 e 20"}, {"label": "Ajuste SINIEF 07/05, Tabela B (CSOSN)"}],
   "params": {"tolerance": "0.01"},                 // usado por primitivas
-  "primitive": null,                               // ou "duplicate_document", quando scope cross_document
-  "tags": ["icms", "simples_nacional", "sale_return"]
+  "primitive": null,                               // ou {"name": "duplicate_document", "params": {…}}, quando scope cross_document
+  "tags": ["icms", "regime"]
 }
 ```
 
-Operadores da DSL (fechados, versionados junto com o motor): `eq, neq, in, not_in, gt, gte, lt, lte, between, present, absent, regex, lookup(table, key), calc(expr aritmética simples)`. Lookup é como a regra consulta tabela de referência **vigente na data do documento** (ex.: alíquota interna de SP para NCM X).
+Operadores da DSL (fechados, versionados junto com o motor — lista completa e semântica em `DSL_RULES.md` §3.1): `eq, neq, in, not_in, gt, gte, lt, lte, between, approx, present, absent, regex, starts_with, ends_with, contains, length_eq, length_between, empty, not_empty`, mais os conectivos (`all/any/not/if`), os quantificadores sobre listas (`every/some/none/count`), `lookup(table, key)` e `calc(expr aritmética simples)`. Lookup é como a regra consulta tabela de referência **vigente na data do documento** (ex.: alíquota interna de SP para NCM X).
 
 ### 3.2 Escopos e o que o motor precisa suportar
 
@@ -127,6 +129,11 @@ Duas datas distintas, não confundir:
 - **Versão da regra** (`version`, `published_at`): quando *nós* mudamos nosso entendimento. Uma correção de bug na regra gera versão nova com a mesma vigência.
 
 Seleção: para um documento de data D, pegar, por `code`, a **maior versão publicada** cuja vigência contém D. Apontamento (finding) grava `rule_version_id`. Reprocessar período depois de corrigir regra = novo run; run antigo fica como histórico ("o que o contador viu na época").
+
+**Como o run faz isso (09/09/2026).** Um run cobre um período, e vigência muda no meio do período (regra v1→v2 em 03/08, alíquota de AL em 01/04). `Audit::TemporalPartition` corta o período nos dias em que *alguma* vigência começa ou termina — regra, sobreposição de regra, versão de tabela, linha de tabela, sobreposição de linha, cenário — e o `Audit::Runner` monta um contexto (`Rules::Resolver` + `Catalog::Lookup` + cenário) por intervalo, avaliando cada documento no intervalo que contém a sua `reference_date`. Agosto/2026 na prática vira dois intervalos, não trinta.
+
+- Escopos `cross_document`, `period` e `scenario` apuram o período inteiro e são avaliados **uma vez**, com a resolução do último dia — é a data do fato "apuração", não a de um documento. Quando a vigência da regra termina no meio do período, ela é avaliada na **última fatia em que ainda valia** (não fica de fora do run, em silêncio).
+- `audit_runs.snapshot` guarda a união (`rule_ids`, `rule_override_ids`, `reference_version_ids`, `reference_row_override_ids`, `scenario_version_id`) **e** `by_interval` com as versões usadas em cada faixa de datas. É isso que sustenta a frase do PDF ao contador ("regras e tabelas vigentes nas datas de emissão").
 
 ---
 
@@ -242,9 +249,9 @@ Agrupadas por escopo. Todas são *dado*; a lista é para dimensionar as primitiv
 5. CFOP 5xxx com `idDest=2` ou 6xxx com `idDest=1` — erro.
 6. CFOP 7xxx sem exportação (`idDest=3` / UF EX) — erro.
 7. NFC-e com CFOP 6xxx/7xxx ou destinatário contribuinte — erro.
-8. `finNFe=4` (devolução) sem `refNFe`; ou CFOP de devolução com `finNFe=1` — erro.
+8. `finNFe=4` (devolução) sem nota referenciada — vale `refNFe` (NF-e) e `refNF` (nota modelo 1); hoje `warning`, porque a SEFAZ já rejeita (321) e num XML autorizado o achado costuma ser leitura nossa do grupo NFref (`DOC.RETURN.REFERENCE`). CFOP de devolução com `finNFe=1` (ou o inverso) continua erro (`CFOP.RETURN.PURPOSE`).
 9. Devolução referenciando nota que não existe na base ou de outro CNPJ; quantidade/valor devolvido > original (acumulado) — erro/alerta (`cross_document`).
-10. CFOP de devolução de venda com CSOSN/CST diferente do esperado (ex.: Simples → 900; normal → espelhar CST da original).
+10. Devolução que não **espelha** a nota original — CST/CSOSN, alíquota e CFOP correspondente (`DOC.RETURN.MIRROR`). O CSOSN 900 é para devolução de *compra*; devolução de venda emitida pelo próprio optante repete o CSOSN da venda (ver `RULES_REVIEW.md`).
 
 **ICMS**
 11. Alíquota interestadual: 4% (origem 1,2,3,8), 7% ou 12% conforme UF origem→destino — lookup `aliq_interestadual`.
@@ -289,6 +296,8 @@ Agrupadas por escopo. Todas são *dado*; a lista é para dimensionar as primitiv
 | 6 | Stack | **Rails 8** API-only + **Sidekiq**. Jobs usam só API do ActiveJob (sem `Sidekiq::Worker` direto) para manter a troca de adapter possível. |
 | 7 | Onboarding | **Inferência assistida**: sistema propõe cenário a partir das notas, contador confirma. |
 | 8 | Painel admin de regras | **No MVP.** Regras vivem no banco desde o início; o repositório carrega apenas um seed inicial. |
+| 12 | `firm_id` em `findings`, `document_items`, `fiscal_records`, `tax_scenarios` (09/09/2026) | **Não desnormalizar agora.** As quatro tabelas penduram em `client_id` (NOT NULL, com FK) e `clients.firm_id` é a única verdade; uma cópia local vira segunda verdade que diverge no dia em que um CNPJ muda de escritório. O escopo de leitura já é feito por `current_firm` → `firm_clients`/`current_client` e nenhuma query precisa do `firm_id` local. **Revisar junto com a RLS do Postgres** (§9): a política por tabela é o que decide se compensa a coluna ou um join. Enquanto isso o invariante é validado onde ele pode divergir — `Audit::AuditRun` recusa `firm_id != client.firm_id`. |
+| 13 | Vigência dentro de uma versão de tabela (09/09/2026) | Duas linhas com a **mesma chave e a mesma vigência** na mesma versão são erro de importação (o lookup ficava com "a última vence") — índice único `(reference_version_id, key, effective_from) NULLS NOT DISTINCT`. Mesma chave com vigências **diferentes** continua legítima: é a alíquota que muda no meio da vigência da versão. |
 
 ---
 
@@ -322,6 +331,7 @@ Isso obriga a DSL a ser **segura por construção** (operadores fechados, sem c�
 
 - Cada tabela base tem `source` (URL/documento legal) e `next_review_at`. Painel admin lista tabelas vencidas.
 - Importar versão nova **não apaga** sobreposições de escritório/cliente; elas continuam válidas dentro da própria vigência. Painel avisa quando uma sobreposição conflita com a nova base ("sua alíquota para NCM X em SP difere da base vigente desde 01/07").
+- **Publicar uma versão dispara `Ingestion::RederiveJob` para todos os clientes** (09/09/2026): derivado que depende do Catalog (`ncm_valid`, `expected_cest`, `st_applicable_by_catalog`, `taxation_kind`, `schedule_rates`…) fica congelado no valor da importação; sem rederivar, publicar a tabela não mudaria documento nenhum e o próximo run repetiria o apontamento antigo.
 - Automatizar a coleta (scraping/consulta de fontes oficiais) fica para depois; primeiro o processo manual com versionamento.
 
 ---
@@ -333,10 +343,13 @@ Rodada de análise sobre o primeiro lote de notas de um cliente (ou a qualquer m
 - Distribuições: CST × CSOSN (→ regime), CFOPs (→ atividade, âmbito, uso de NFC-e), `indIEDest` (→ perfil de destinatário), ST destacada por NCM (→ ST aplicável), IPI destacado (→ contribuinte IPI), PIS/COFINS CST (→ regime confirma), presença de grupos IBS/CBS.
 - Saída: **proposta de cenário** com nível de confiança por campo e a evidência ("97% dos itens com CSOSN → Simples Nacional"). Contador confirma/ajusta campo a campo; o cenário publicado guarda `origin: inferred|manual` por campo.
 - Reutiliza o mesmo mecanismo do escopo `scenario` das regras (seção 3.2): as primitivas estatísticas servem tanto para propor quanto para desconfiar.
+- `Scenario::Inference` lê só campos derivados/catálogo do item (`cfop_own_production`, `cfop_nature`, `cfop_st_role`, `icms.taxation_kind`, `pis.taxation_kind`/`cst_direction`) — nenhuma lista de CFOP/CST em Ruby. A alíquota que separa PIS cumulativo × não cumulativo vem da regra publicada `PISCOFINS.RATE.REGIME` vigente na nota mais recente (não há tabela própria); sem versão vigente, `pis_cofins` sai com `value: {}` e confiança 0 em vez de palpite.
 
 ---
 
 ## 15. Próximos passos
+
+> Os itens abaixo são um **histórico datado**: as contagens de cada linha valem para a data dela. Estado atual das regras: `docs/RULES.md` (regenerado do banco); das tabelas: `DATA_SOURCES.md` §2b.
 
 1. ✅ `docs/CANONICO.md`, `docs/DSL_RULES.md`, `docs/DATA_SOURCES.md`.
 2. ✅ Esqueleto (29/08/2026): monorepo `api/` (Rails 8.1, Sidekiq 8, PG 17) + `web/` (Vue 3, Vite, Tailwind 4, Pinia) + `docker-compose.yml`. Migration do núcleo, models por domínio, DSL completa (`Rules::Dsl::*`), `Rules::Engine`/`Resolver`, primitivas `items_sum_matches_totals` e `duplicate_document`, parser NF-e + derivações, importador idempotente, jobs, `Audit::Runner`, API mínima e painel de findings. Seeds com 7 tabelas do Catalog e 13 regras. Fluxo ponta a ponta verificado (RSpec 10/10 e via HTTP).
