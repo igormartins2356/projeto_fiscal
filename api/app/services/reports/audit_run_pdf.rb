@@ -9,12 +9,18 @@ module Reports
     def render
       html = ActionController::Base.render(template: "reports/audit_run", layout: "pdf", assigns: build_assigns)
       WickedPdf.new.pdf_from_string(html, page_size: "A4", margin: { top: 12, bottom: 14, left: 12, right: 12 },
-                                    footer: { font_size: 7, right: "[page]/[topage]", left: "Gerado em #{I18n.l(Time.current, format: :short) rescue Time.current.strftime('%d/%m/%Y %H:%M')}" })
+                                    footer: { font_size: 7, right: "[page]/[topage]", left: "Gerado em #{generated_at}" })
     end
 
     def filename = "auditoria-#{@run.client.legal_name.parameterize}-#{@run.period_start.strftime('%Y-%m')}-run#{@run.id}.pdf"
 
     private
+
+    def generated_at
+      I18n.l(Time.current, format: :short)
+    rescue I18n::ArgumentError, I18n::MissingTranslationData
+      Time.current.strftime("%d/%m/%Y %H:%M")
+    end
 
     def build_assigns
       findings = @run.findings.visible.includes(:document, :rule)
@@ -27,9 +33,8 @@ module Reports
       end.sort_by { |g| [{ "error" => 0, "warning" => 1, "info" => 2 }[g[:severity]] || 3, -g[:count]] }
       docs = @run.client.documents.fiscal.in_period(@run.period_start, @run.period_end)
       {
-        run: @run, client: @run.client, firm: @run.firm, findings_count: findings.count, by_severity:, groups:,
-        docs_stats: { total: docs.count, authorized: docs.where(status_state: "authorized").count, cancelled: docs.where(status_state: "cancelled").count,
-                      total_amount: docs.where(status_state: "authorized").sum(:total_amount) },
+        run: @run, client: @run.client, firm: @run.firm, by_severity:, groups:,
+        docs_stats: { total: docs.count, cancelled: docs.where(status_state: "cancelled").count },
         severity_label: SEVERITY_LABEL
       }
     end
