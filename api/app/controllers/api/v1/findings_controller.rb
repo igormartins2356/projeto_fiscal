@@ -18,16 +18,19 @@ module Api
         dir = params[:sort_order].to_s == "-1" || params[:sort_order].to_s == "desc" ? :desc : :asc
         scope = scope.order(field => dir, :document_id => :asc, :item_number => :asc)
 
-        per_page = params.fetch(:per_page, 25).to_i.clamp(1, 200)
-        page = [params.fetch(:page, 1).to_i, 1].max
-        total = scope.count
-        rows = scope.offset((page - 1) * per_page).limit(per_page)
-        render json: { data: rows.map { |f| serialize(f) }, total:, page:, per_page: }
+        rows, meta = paginate(scope)
+        render json: meta.merge(data: rows.map { |f| serialize(f) })
       end
 
       def update
         f = Audit::Finding.where(client: current_client).find(params[:id])
-        f.update!(state: params.require(:state), state_note: params[:state_note], state_changed_at: Time.current)
+        state = params.require(:state)
+        # Justificativa suprime recorrência e transfere responsabilidade (ARQUITETURA §13.2): sem ela não há o que registrar.
+        if Audit::Finding::STATES_REQUIRING_NOTE.include?(state) && params[:state_note].blank?
+          return render json: { error: "justificativa obrigatória para esta situação" }, status: :unprocessable_entity
+        end
+        f.update!(state:, state_note: params[:state_note], state_changed_at: Time.current, state_changed_by: current_user)
+        audit!("finding_state_changed", subject: f, rule_code: f.rule_code, to: state, note: f.state_note)
         render json: serialize(f)
       end
 

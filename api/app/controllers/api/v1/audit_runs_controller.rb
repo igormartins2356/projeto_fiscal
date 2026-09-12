@@ -2,8 +2,13 @@ module Api
   module V1
     class AuditRunsController < BaseController
       before_action :require_client!
+      # `snapshot`, `coverage` e `evaluation_errors` são jsonb grandes e só interessam ao detalhe do run:
+      # serializá-los na listagem trafegava megabytes por página.
+      INDEX_FIELDS = %i[id period_start period_end state documents_count findings_count started_at finished_at created_at].freeze
+
       def index
-        render json: current_client.audit_runs.order(created_at: :desc).limit(50)
+        rows, meta = paginate(current_client.audit_runs.order(created_at: :desc))
+        render json: meta.merge(data: rows.as_json(only: INDEX_FIELDS))
       end
 
       def create

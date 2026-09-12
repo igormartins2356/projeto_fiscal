@@ -57,7 +57,7 @@ RSpec.describe "Admin: rules & reference tables", type: :request do
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body["rows_count"]).to eq(5)
     get "/api/v1/admin/reference_tables/#{table.id}/versions/#{v['id']}/diff", headers: h
-    expect(response.parsed_body["counts"]).to include("added" => 1, "changed" => 0)
+    expect(response.parsed_body["counts"]).to include("added" => 1, "changed" => 1) # diff compara vigência e base legal: SP|* muda de base legal
     post "/api/v1/admin/reference_tables/#{table.id}/versions/#{v['id']}/publish", headers: h
     expect(response.parsed_body["state"]).to eq("published")
     expect(table.versions.find_by(version: 1).reload.effective_until).to eq(Date.new(2026, 3, 31))

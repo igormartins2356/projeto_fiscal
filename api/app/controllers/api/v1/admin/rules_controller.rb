@@ -35,6 +35,7 @@ module Api
         def update
           return render json: { error: "só rascunho/em teste podem ser editados; crie nova versão" }, status: :unprocessable_entity unless @rule.state.in?(%w[draft testing])
           @rule.update!(rule_params)
+          audit!("rule_updated", subject: @rule)
           render json: serialize(@rule, full: true)
         end
 
@@ -65,7 +66,7 @@ module Api
 
         # Disparos recentes (modo sombra): findings por run nos últimos N runs
         def stats
-          runs = Audit::AuditRun.where(state: "done").order(created_at: :desc).limit(params.fetch(:runs, 20).to_i)
+          runs = Audit::AuditRun.where(state: "done").order(created_at: :desc).limit(params.fetch(:runs, 20).to_i.clamp(1, 200))
           findings = Audit::Finding.where(rule_id: @rule.id, audit_run_id: runs.select(:id))
           render json: { runs: runs.size, findings: findings.count, by_state: findings.group(:state).count,
                          by_group: findings.group(:group_key).count.sort_by { |_, n| -n }.first(20).map { |g, n| { group_key: g, count: n } },
