@@ -1,0 +1,187 @@
+# Alíquota interna geral (modal) de ICMS por UF. Chave: [uf, ncm]; "*" é a linha geral, usada quando
+# não há linha por NCM. Classe C em DATA_SOURCES: dado curado, conferido linha a linha contra a norma.
+#
+# Reconstrução de 2026-09-10, conferida em fonte primária (lei estadual e RICMS) UF a UF. A versão
+# anterior foi perdida do banco de desenvolvimento e não existia no repositório; este arquivo passa a
+# ser a fonte reproduzível (rake catalog:icms_internal_rate).
+#
+# `fcp_rate` é APENAS o adicional de fundo de combate à pobreza que (a) incide de forma geral sobre as
+# mercadorias e (b) vai destacado no campo pFCP da NF-e. Adicional por lista de produtos, embutido na
+# alíquota (PE, MS, ES) ou recolhido em guia própria fora do pFCP (RS) fica 0.00 — é assim que o motor
+# usa o campo, e somar onde não se destaca produz cálculo errado.
+#
+# `confirm: true` marca a UF que NÃO foi fechada em fonte primária. Essas linhas não entram na versão
+# gerada: tabela esparsa não gera apontamento, alíquota errada gera. Para incluí-las, leia a norma,
+# corrija a linha e remova a marca.
+#
+# `effective_from` é a data em que a alíquota atual passou a valer. Documento anterior a ela não acha
+# linha e não é avaliado — preferível a ser avaliado contra a alíquota errada (ver RN e AL).
+
+- uf: AC
+  rate: "19.00"
+  fcp_rate: "0.00"
+  effective_from: "2023-04-01"
+  legal_basis: "Lei Complementar estadual 55/1997, art. 18, I (redação da LC 422/2022)"
+
+- uf: AL
+  rate: "20.50"
+  fcp_rate: "0.00"
+  effective_from: "2026-04-01"
+  legal_basis: "Lei 5.900/1996, art. 17, I, 'b' (redação da Lei 9.776/2025). FECOEP de 1% da Lei 6.558/2004, art. 2º-A, é geral e somado (carga 21,50%), mas o destaque em pFCP não foi confirmado em norma: fcp_rate fica zerado até confirmar"
+
+- uf: AM
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2023-03-29"
+  legal_basis: "Lei Complementar estadual 19/1997 (redação da LC 242/2022). FCP da Lei 4.454/2017 é por lista"
+
+- uf: AP
+  rate: "18.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "RICMS/AP, art. 25, III, 'i' (Decreto 2.269/1998). Não instituiu FCP"
+  confirm: true # alíquota só em fonte secundária e data de vigência não localizada
+
+- uf: BA
+  rate: "20.50"
+  fcp_rate: "0.00"
+  effective_from: "2024-02-07"
+  legal_basis: "Lei 7.014/1996, art. 15 (redação da Lei 14.629/2023). FUNCEP de 2% é por lista"
+
+- uf: CE
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-01"
+  legal_basis: "Lei 12.670/1996 (alteração de 2023). FECOP de 2% da LC 37/2003 é por lista"
+  confirm: true # número da lei alteradora não fechado em fonte primária (suspeita de contaminação com a Lei 18.305/2023, que é de PE)
+
+- uf: DF
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-22"
+  legal_basis: "Lei 1.254/1996, art. 18, II, 'c' (redação da Lei 7.326/2023). Adicional de 2 p.p. só sobre a lista da Lei 4.220/2008"
+  confirm: true # data divergente entre 01/01 e 22/01/2024
+
+- uf: ES
+  rate: "17.00"
+  fcp_rate: "0.00"
+  effective_from: "2002-01-01"
+  legal_basis: "Lei 7.000/2001, art. 20, I, 'a'. Adicional de 2 p.p. é por lista e embutido na alíquota, sem pFCP"
+
+- uf: GO
+  rate: "19.00"
+  fcp_rate: "0.00"
+  effective_from: "2024-04-01"
+  legal_basis: "Lei 11.651/1991 (CTE), art. 27 (redação da Lei 22.460/2023). Protege de 2% é por lista"
+  confirm: true # alíquota, data e lei só em fonte secundária
+
+- uf: MA
+  rate: "23.00"
+  fcp_rate: "0.00"
+  effective_from: "2025-02-23"
+  legal_basis: "Lei 7.799/2002, art. 23, III (redação da Lei 12.426/2024). FUMACOP de 2% é por lista"
+
+- uf: MG
+  rate: "18.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "Lei 6.763/1975, art. 12, I; RICMS do Decreto 48.589/2023. FEM de 2% é por lista"
+
+- uf: MS
+  rate: "17.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "Lei 1.810/1997, art. 41. FECOMP de 2% é por lista e embutido na alíquota"
+
+- uf: MT
+  rate: "17.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "Lei 7.098/1998; RICMS, art. 95. FCP da LC 144/2003 é por lista"
+
+- uf: PA
+  rate: "19.00"
+  fcp_rate: "0.00"
+  effective_from: "2023-03-16"
+  legal_basis: "Lei 5.530/1989 (redação da Lei 9.755/2022). Sem FCP"
+
+- uf: PB
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-01"
+  legal_basis: "Lei 6.379/1996, art. 11, I (redação da Lei 12.788/2023). Cesta básica segue 18% pelo art. 11, XIII. FUNCEP de 2 p.p. é por lista"
+
+- uf: PE
+  rate: "20.50"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-01"
+  legal_basis: "Lei 15.730/2016, art. 15, VII (redação da Lei 18.305/2023). Os 20,50% são a alíquota das operações fora do FECEP; itens do Anexo 1 têm o total já embutido (29%, 27% e 22,5%), então nunca some FCP"
+
+- uf: PI
+  rate: "22.50"
+  fcp_rate: "0.00"
+  effective_from: "2025-04-01"
+  legal_basis: "Lei 4.257/1989 (redação da Lei 8.558/2024). FECOP de 2% é por lista"
+
+- uf: PR
+  rate: "19.50"
+  fcp_rate: "0.00"
+  effective_from: "2024-03-18"
+  legal_basis: "Lei 11.580/1996, art. 14, VIII (Lei 21.850/2023, art. 4º; noventena contada da republicação). Adicional do art. 14-A é por lista, a consumidor final"
+
+- uf: RJ
+  rate: "20.00"
+  fcp_rate: "2.00"
+  effective_from: "2024-03-20"
+  legal_basis: "Lei 2.657/1996, art. 14, I (redação da Lei 10.253/2023); FECP da LC estadual 210/2023, destacado por item conforme Resolução SEFAZ 714/2024"
+
+- uf: RN
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2025-03-20"
+  legal_basis: "Lei 6.968/1996, art. 27, I, 'a' (redação da Lei 11.999/2024). Antes de 20/03/2025 a alíquota era 18%. Adicional do art. 27-A é por lista"
+
+- uf: RO
+  rate: "19.50"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-12"
+  legal_basis: "Lei 688/1996, art. 27, I, 'c' (redação das Leis 5.629/2023 e 5.634/2023). FECOEP de 2% do art. 27-A é seletivo"
+
+- uf: RR
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2023-03-30"
+  legal_basis: "Lei 59/1993, art. 32 (redação da Lei 1.767/2022). Não instituiu FCP"
+  confirm: true # texto da lei não acessível para conferência
+
+- uf: RS
+  rate: "17.00"
+  fcp_rate: "0.00"
+  effective_from: "2022-01-01"
+  legal_basis: "RICMS/RS, art. 27, X (Decreto 37.699/1997, redação do Decreto 55.692/2020, Lei 15.576/2020). AMPARA/RS de 2 p.p. é por lista e vai em informações complementares com guia própria, fora do pFCP"
+
+- uf: SC
+  rate: "17.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "Lei 10.297/1996, art. 19, I. Não tem FCP no ICMS"
+
+- uf: SE
+  rate: "19.00"
+  fcp_rate: "0.00"
+  effective_from: "2023-04-01"
+  legal_basis: "RICMS/SE, art. 40, I (Lei 9.176/2023). FECOEP de 1% desde 01/05/2023 tem escopo divergente entre fontes: não gravado até confirmar"
+  confirm: true # escopo do adicional decide se ele entra em venda interna entre contribuintes
+
+- uf: SP
+  rate: "18.00"
+  fcp_rate: "0.00"
+  effective_from: "2003-01-01"
+  legal_basis: "RICMS/SP, art. 52, I (Decreto 45.490/2000); Lei 6.374/1989, art. 34. Não tem FCP geral (art. 56-C alcança só bebida alcoólica e fumo)"
+
+- uf: TO
+  rate: "20.00"
+  fcp_rate: "0.00"
+  effective_from: "2024-01-01"
+  legal_basis: "Lei 1.287/2001, art. 27 (redação da Lei 4.141/2023). FECOEP de 2% é por lista"
+  confirm: true # data divergente entre 01/04/2023 e 01/01/2024 por conta da ADI 7375
