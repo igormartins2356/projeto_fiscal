@@ -4,7 +4,7 @@ module Rules
     class EventConsistency < Base
       register "event_consistency"
       scope "cross_document"
-      params_schema cancellation_deadline_hours: { default: 24 }, check: { default: "all" }
+      params_schema cancellation_deadline_hours: { default: nil }, check: { default: "all" }   # prazo é dado da regra (seed), não do motor
       vars :problem, :hours_after_issue
 
       def call
@@ -16,9 +16,11 @@ module Rules
           doc = by_key[ev["access_key"]] or next
           kind = ev.dig("event", "kind")
           if kind.in?(%w[cancellation cancellation_by_replacement]) && check?("late_cancellation")
-            issued, occurred = Time.zone.parse(doc.dig("issuance", "issued_at").to_s), Time.zone.parse(ev.dig("event", "occurred_at").to_s)
-            if issued && occurred && occurred > issued + @params["cancellation_deadline_hours"].to_i.hours
-              hours = ((occurred - issued) / 3600).round
+            deadline = param!("cancellation_deadline_hours").to_i
+            issued, occurred = Dsl::Value.to_time(doc.dig("issuance", "issued_at")), Dsl::Value.to_time(ev.dig("event", "occurred_at"))
+            if occurred > issued + deadline.hours
+              # Time#- devolve segundos com subsegundo; converter por to_i truncaria a fração e pioraria o arredondamento
+              hours = (dec(occurred - issued) / 3600).round(0, BigDecimal::ROUND_HALF_UP).to_i
               hits << { target: { document_id: doc["_id"] }, evidence: { "problem" => "late_cancellation", "hours_after_issue" => hours, "issued_at" => doc.dig("issuance", "issued_at"), "cancelled_at" => ev.dig("event", "occurred_at") },
                         vars: { "problem" => "cancelamento #{hours}h após a emissão (prazo #{@params['cancellation_deadline_hours']}h)", "hours_after_issue" => hours } }
             end

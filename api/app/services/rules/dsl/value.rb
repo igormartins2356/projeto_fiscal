@@ -35,6 +35,18 @@ module Rules
         raise EvaluationError, "not a date: #{v.inspect}"
       end
 
+      # Data/hora com hora do dia (prazos de evento); string inválida vira EvaluationError, não nil.
+      def self.to_time(v)
+        case v
+        when Time, DateTime then v
+        when Date then v.in_time_zone
+        when String then Time.zone.parse(v) || raise(EvaluationError, "não é data/hora: #{v.inspect}")
+        else raise EvaluationError, "não é data/hora: #{v.inspect}"
+        end
+      rescue ArgumentError
+        raise EvaluationError, "não é data/hora: #{v.inspect}"
+      end
+
       # Comparação tolerante a tipos: decimal x string numérica compara numericamente.
       def self.compare(a, b)
         if numeric?(a) && numeric?(b) then to_decimal(a) <=> to_decimal(b)

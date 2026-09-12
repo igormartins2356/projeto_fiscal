@@ -31,6 +31,24 @@ RSpec.describe "cross-document primitives & catalog importers" do
     expect(run.findings.where(rule_code: "DOC.DUPLICATE.NUMBER_SERIES")).to be_empty
   end
 
+  it "return_references_original: o mapa CFOP venda→devolução vem da regra (params.cfop_mirror), não de default em Ruby" do
+    require Rails.root.join("lib/rule_case_builder")
+    key_for = ->(n) { "3526031234567800019055001000000#{n.to_s.rjust(4, '0')}1000000000" }
+    sale = RuleCaseBuilder.doc(doc: { "access_key" => key_for.(100), "issuance" => { "number" => 100 } }).merge("_id" => 0, "role" => "issuer", "monitored_cnpj" => "12345678000190")
+    ret = ->(cfop) { RuleCaseBuilder.doc(item: { product: { cfop: } }, doc: { "access_key" => key_for.(200), "issuance" => { "number" => 200, "purpose" => "return" }, "operation" => { "direction_declared" => "inbound" }, "references" => [{ "kind" => "nfe", "access_key" => key_for.(100) }] }).merge("_id" => 1, "role" => "issuer", "monitored_cnpj" => "12345678000190") }
+    ctx = ->(r) { { "period" => { "documents" => [sale, r] } } }
+
+    seeded = Rules::Rule.where(code: "DOC.RETURN.MIRROR", state: "published").order(version: :desc).first.definition.dig("primitive", "params")
+    expect(seeded["cfop_mirror"]).to include("5102" => ["1202"], "5405" => %w[1411 1202])
+
+    expect { Rules::Primitives::ReturnReferencesOriginal.new({ "check" => "mirror" }, ctx.(ret.("1201"))).call }.to raise_error(Rules::EvaluationError, "cfop_mirror não informado")
+    expect(Rules::Primitives::ReturnReferencesOriginal.new({ "check" => "exceeds" }, ctx.(ret.("1201"))).call).to eq([])
+
+    hits = Rules::Primitives::ReturnReferencesOriginal.new(seeded, ctx.(ret.("1201"))).call
+    expect(hits.map { |h| h[:evidence].slice("field", "found", "expected", "original_cfop") }).to eq([{ "field" => "product.cfop", "found" => "1201", "expected" => "1202", "original_cfop" => "5102" }])
+    expect(Rules::Primitives::ReturnReferencesOriginal.new(seeded, ctx.(ret.("1202"))).call).to eq([])
+  end
+
   it "imports NCM json and cClassTrib json into draft versions" do
     r = Catalog::Importers::Ncm.new.call(json: { "Data_Ultima_Atualizacao" => "01/08/2026", "Nomenclaturas" => [
       { "Codigo" => "8471.30.12", "Descricao" => "Máquinas portáteis", "Data_Inicio" => "01/04/2022", "Data_Fim" => "31/12/9999" },

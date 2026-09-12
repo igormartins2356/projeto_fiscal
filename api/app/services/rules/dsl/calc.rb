@@ -8,6 +8,8 @@ module Rules
       KEYWORDS = %w[and or not true false null].freeze
 
       def self.evaluate(expr, ctx) = new(expr, ctx).evaluate
+      # Tokens da expressão, para a validação estática (Validator confere os identificadores)
+      def self.tokens(expr) = new(expr, {}).tokens
 
       def initialize(expr, ctx)
         @ctx = ctx
@@ -20,6 +22,8 @@ module Rules
         raise EvaluationError, "unexpected token #{peek.inspect} in calc" unless peek.nil?
         v
       end
+
+      attr_reader :tokens
 
       private
 
@@ -43,15 +47,23 @@ module Rules
         next!
       end
 
+      # Sem curto-circuito: o lado direito precisa ser consumido mesmo quando o esquerdo já decide,
+      # senão os tokens sobram na fila e "true or false" vira "unexpected token".
       def parse_or
         l = parse_and
-        l = (truthy(l) || truthy(parse_and)) while accept(:id, "or")
+        while accept(:id, "or")
+          r = parse_and
+          l = truthy(l) || truthy(r)
+        end
         l
       end
 
       def parse_and
         l = parse_not
-        l = (truthy(l) && truthy(parse_not)) while accept(:id, "and")
+        while accept(:id, "and")
+          r = parse_not
+          l = truthy(l) && truthy(r)
+        end
         l
       end
 

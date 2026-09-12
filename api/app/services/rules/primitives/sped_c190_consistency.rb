@@ -11,7 +11,7 @@ module Rules
 
       def call
         file = @ctx["fiscal_file"] or return []
-        tol = BigDecimal(@params["tolerance"].to_s)
+        tol = dec(@params["tolerance"])
         hits = []
         (file["c100"] || []).each do |r|
           c170, c190 = r["c170"] || [], r["c190"] || []
@@ -39,7 +39,7 @@ module Rules
 
       private
 
-      def dec(v) = BigDecimal(v.presence || "0")
+      def dec(v) = Dsl::Value.to_decimal(v.presence || "0")
     end
   end
 end

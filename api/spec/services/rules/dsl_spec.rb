@@ -33,7 +33,34 @@ RSpec.describe Rules::Dsl do
     expect(Rules::Dsl::Condition.evaluate({ "count" => "doc.items", "where" => { "field" => "it.n", "op" => "gt", "value" => 2 }, "op" => "eq", "value" => 1 }, ctx)).to be true
   end
 
+  # A6: sem curto-circuito o lado direito ficava na fila de tokens e a expressão levantava
+  it "evaluates and/or with either side decisive" do
+    expect(Rules::Dsl::Calc.evaluate("true or false", ctx)).to be true
+    expect(Rules::Dsl::Calc.evaluate("false or true", ctx)).to be true
+    expect(Rules::Dsl::Calc.evaluate("true and false", ctx)).to be false
+    expect(Rules::Dsl::Calc.evaluate("false and true", ctx)).to be false
+    expect(Rules::Dsl::Calc.evaluate("1 < 2 or 3 < 2", ctx)).to be true
+    expect(Rules::Dsl::Calc.evaluate("true or false and false", ctx)).to be true      # and liga mais forte que or
+    expect(Rules::Dsl::Calc.evaluate("(true or false) and false", ctx)).to be false
+    expect(Rules::Dsl::Calc.evaluate("item.icms.rate == 12 or item.icms.rate == 7", ctx)).to be true
+  end
+
+  # A7: regex inválida vinda de regra/override não pode derrubar o run
+  it "turns an invalid regex into an evaluation error" do
+    expect { Rules::Dsl::Condition.evaluate({ "field" => "item.product.cfop", "op" => "regex", "value" => "(" }, ctx) }
+      .to raise_error(Rules::EvaluationError, /expressão regular inválida/)
+    expect(Rules::Dsl::Condition.evaluate({ "field" => "item.product.cfop", "op" => "regex", "value" => "\\A5\\d{3}\\z" }, ctx)).to be true
+  end
+
+  it "compares list membership with contains the same way as in" do
+    list_ctx = ctx.merge("doc" => ctx["doc"].merge("rates" => ["18.00"]))
+    expect(Rules::Dsl::Condition.evaluate({ "field" => "doc.rates", "op" => "contains", "value" => "18" }, list_ctx)).to be true
+  end
+
   it "renders templates" do
     expect(Rules::Dsl::Template.render("rate {{item.icms.rate}} / {{item.ipi.rate}}", ctx)).to eq("rate 12.00 / —")
+    bool_ctx = { "doc" => { "operation" => { "final_consumer" => true }, "totals" => { "items_sum" => { "icms" => BigDecimal("18.5") } } } }
+    expect(Rules::Dsl::Template.render("consumidor final: {{doc.operation.final_consumer}}; soma {{doc.totals.items_sum}}", bool_ctx))
+      .to eq("consumidor final: sim; soma icms: 18.5")
   end
 end

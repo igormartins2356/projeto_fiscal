@@ -8,10 +8,12 @@ module Rules
       scope "cross_document"
       params_schema check: { default: "all" }, tolerance: { default: "0.0001" },
                     mirror_fields: { default: %w[icms.situation_code icms.rate pis.cst cofins.cst] },
-                    cfop_mirror: { default: { "5101" => %w[1201], "6101" => %w[2201], "5102" => %w[1202], "6102" => %w[2202], "5401" => %w[1410], "6401" => %w[2410], "5403" => %w[1411], "6403" => %w[2411], "5405" => %w[1411 1202], "6404" => %w[2411 2202], "5103" => %w[1201], "5104" => %w[1202], "5105" => %w[1201], "5106" => %w[1202], "7101" => %w[3201], "7102" => %w[3202] } }
+                    cfop_mirror: { default: nil } # { CFOP da venda => [CFOPs de devolução aceitos] } — é dado fiscal, vem da regra (seed), nunca daqui
       vars :referenced_access_key, :original_access_key, :product_code, :returned_quantity, :original_quantity, :problem, :field, :found, :expected, :original_cfop
 
       def call
+        # Sem o mapa o espelho de CFOP decidiria pelo nada; melhor evaluation_error do que silêncio ou finding falso
+        raise EvaluationError, "cfop_mirror não informado" if check?("mirror") && @params["cfop_mirror"].blank?
         docs = @ctx.dig("period", "documents") || []
         by_key = docs.to_h { |d| [d["access_key"], d] }
         returns = docs.select { |d| d.dig("issuance", "purpose") == "return" && d["role"] == "issuer" }
@@ -28,9 +30,9 @@ module Rules
               hits << { target: { document_id: ret["_id"] }, evidence: { "referenced_access_key" => ref["access_key"] }, vars: { "referenced_access_key" => ref["access_key"], "problem" => "original_not_found" } }
               next
             end
-            ret["items"].each do |it|
+            Array(ret["items"]).each do |it|
               code = it.dig("product", "code")
-              returned[original["access_key"]][code] += BigDecimal((it.dig("product", "commercial_quantity") || "0").to_s)
+              returned[original["access_key"]][code] += dec(it.dig("product", "commercial_quantity") || "0")
               hits.concat(mirror(ret, it, original)) if check?("mirror")
             end
           end
@@ -40,9 +42,9 @@ module Rules
           returned.each do |okey, per_product|
             original = by_key[okey]
             per_product.each do |code, qty|
-              orig_qty = original["items"].select { |i| i.dig("product", "code") == code }.sum(BigDecimal("0")) { |i| BigDecimal((i.dig("product", "commercial_quantity") || "0").to_s) }
-              next if orig_qty.zero? || qty <= orig_qty + BigDecimal(@params["tolerance"].to_s)
-              ret = returns.find { |r| (r["references"] || []).any? { |x| x["access_key"] == okey } && r["items"].any? { |i| i.dig("product", "code") == code } }
+              orig_qty = Array(original["items"]).select { |i| i.dig("product", "code") == code }.sum(BigDecimal("0")) { |i| dec(i.dig("product", "commercial_quantity") || "0") }
+              next if orig_qty.zero? || qty <= orig_qty + dec(@params["tolerance"])
+              ret = returns.find { |r| (r["references"] || []).any? { |x| x["access_key"] == okey } && Array(r["items"]).any? { |i| i.dig("product", "code") == code } }
               hits << { target: { document_id: ret&.dig("_id") }, evidence: { "original_access_key" => okey, "product_code" => code, "returned_quantity" => qty.to_s("F"), "original_quantity" => orig_qty.to_s("F") },
                         vars: { "original_access_key" => okey, "product_code" => code, "returned_quantity" => qty, "original_quantity" => orig_qty, "problem" => "exceeds_original" } }
             end

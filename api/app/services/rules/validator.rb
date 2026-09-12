@@ -21,12 +21,21 @@ module Rules
       walk_condition(@d["assert"], "assert") if @d["assert"]
       check_primitive if @d["primitive"]
       check_message
+      check_group_by
       @errors.empty?
     end
 
     private
 
-    def scope = @d["scope"]
+    # `evidence` de primitiva é avaliada item a item: os caminhos valem no escopo `item`, não no da regra
+    def scope = @path_scope || @d["scope"]
+
+    def with_scope(s)
+      previous, @path_scope = @path_scope, s
+      yield
+    ensure
+      @path_scope = previous
+    end
 
     def check_shape
       @errors << "code obrigatório (PREFIX.SUBJECT.DETAIL)" unless @d["code"].to_s.match?(/\A[A-Z0-9_]+(\.[A-Z0-9_]+)+\z/)
@@ -35,6 +44,7 @@ module Rules
       @errors << "informe exatamente um de assert ou primitive" unless [@d["assert"], @d["primitive"]].compact.size == 1
       @errors << "message obrigatória" if @d["message"].blank?
       @errors << "effective_from obrigatório" if @d["effective_from"].blank?
+      @errors << "dsl_version #{@d['dsl_version'].inspect} desconhecida (o motor só avalia a 1)" unless @d["dsl_version"].to_i == 1
     end
 
     def check_let
@@ -78,8 +88,25 @@ module Rules
         @errors << "#{where}: op '#{c['op']}' desconhecido" unless OPS.include?(c["op"])
         check_path(c["field"], where) if c["field"]
         check_value(c["value"], where) if c.key?("value")
-        @errors << "#{where}: approx exige tolerance ou tolerance_pct" if c["op"] == "approx" && !c.key?("tolerance") && !c.key?("tolerance_pct")
+        check_arity(c, where)
+        if c["op"] == "approx"
+          @errors << "#{where}: approx exige tolerance ou tolerance_pct" if !c.key?("tolerance") && !c.key?("tolerance_pct")
+          %w[tolerance tolerance_pct].each { |k| check_tolerance(c[k], "#{where}.#{k}") if c.key?(k) }
+        end
       end
+    end
+
+    # between/length_between comparam contra [min, max]; com escalar a condição seria sempre falsa em silêncio
+    def check_arity(c, where)
+      return unless %w[between length_between].include?(c["op"])
+      v = c["value"]
+      return if v.is_a?(Hash) && (v["ref"] || v["calc"] || v["param"])   # resolvido em tempo de execução
+      @errors << "#{where}: op '#{c['op']}' exige value com dois elementos [min, max]" unless v.is_a?(Array) && v.size == 2
+    end
+
+    def check_tolerance(t, where)
+      return check_value(t, where) if t.is_a?(Hash)
+      @errors << "#{where}: tolerância deve ser numérica" unless Dsl::Value.numeric?(t)
     end
 
     def check_let_like(c, where)
@@ -91,7 +118,8 @@ module Rules
       return unless v.is_a?(Hash)
       check_path(v["ref"], where) if v["ref"]
       check_calc(v["calc"], where) if v["calc"]
-      @errors << "#{where}: param '#{v['param']}' não declarado em params" if v["param"] && !@d.dig("params", v["param"])
+      # key?: param declarado como false/0 é declarado
+      @errors << "#{where}: param '#{v['param']}' não declarado em params" if v.key?("param") && !@d.fetch("params", {}).to_h.key?(v["param"])
     end
 
     def check_path(path, where)
@@ -102,7 +130,7 @@ module Rules
     end
 
     def check_calc(expr, where)
-      Dsl::Calc.new(expr, {}).send(:tokenize, expr).each { |t| check_path(t[1], where) if t[0] == :id && !Dsl::Calc::FUNCTIONS.include?(t[1]) && !Dsl::Calc::KEYWORDS.include?(t[1]) }
+      Dsl::Calc.tokens(expr).each { |t| check_path(t[1], where) if t[0] == :id && !Dsl::Calc::FUNCTIONS.include?(t[1]) && !Dsl::Calc::KEYWORDS.include?(t[1]) }
     rescue EvaluationError => e
       @errors << "#{where}: calc inválido (#{e.message})"
     end
@@ -113,8 +141,14 @@ module Rules
       @errors << "primitiva '#{name}' é de escopo #{klass.scope}, regra é #{scope}" if klass.scope != scope
       unknown = (@d.dig("primitive", "params") || {}).keys.map(&:to_s) - klass.params_schema.keys.map(&:to_s)
       @errors << "primitiva '#{name}': params desconhecidos #{unknown.join(', ')}" if unknown.any?
+      evidence = @d.dig("primitive", "params", "evidence")
+      with_scope("item") { walk_condition(evidence, "primitive.params.evidence") } if evidence
     rescue EvaluationError => e
       @errors << e.message
+    end
+
+    def check_group_by
+      Array(@d["group_by"]).each { |p| check_path(p, "group_by") }
     end
 
     def check_message

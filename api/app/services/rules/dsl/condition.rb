@@ -57,15 +57,23 @@ module Rules
           else
             (a - b).abs <= Value.to_decimal(Value.resolve(cond.fetch("tolerance", "0"), ctx))
           end
-        when "regex" then actual.to_s.match?(Regexp.new(value.to_s))
+        when "regex" then regex_match?(actual, value)
         when "starts_with" then actual.to_s.start_with?(value.to_s)
         when "ends_with" then actual.to_s.end_with?(value.to_s)
-        when "contains" then actual.is_a?(Array) ? actual.include?(value) : actual.to_s.include?(value.to_s)
+        when "contains" then actual.is_a?(Array) ? actual.any? { |v| Value.equal?(v, value) } : actual.to_s.include?(value.to_s)
         when "length_eq" then actual.to_s.length == value.to_i
         when "length_between" then actual.to_s.length.between?(value[0].to_i, value[1].to_i)
         when "empty" then actual.respond_to?(:empty?) ? actual.empty? : actual.nil?
         when "not_empty" then actual.respond_to?(:empty?) ? !actual.empty? : !actual.nil?
         end
+      end
+
+      # Regex vinda de regra/override pode ser inválida ou catastrófica: vira evaluation_error da regra,
+      # nunca uma exceção que derruba o run inteiro.
+      def self.regex_match?(actual, value)
+        actual.to_s.match?(Regexp.new(value.to_s, timeout: 0.1))
+      rescue RegexpError, ArgumentError => e
+        raise EvaluationError, "expressão regular inválida #{value.inspect}: #{e.message}"
       end
 
       def self.cmp(a, b)
