@@ -9,9 +9,10 @@ module Catalog
       @overrides_enabled = overrides_enabled
       @tables = {}
       @versions_used = {}
+      @row_override_ids_used = []
     end
 
-    attr_reader :versions_used
+    attr_reader :versions_used, :row_override_ids_used
 
     # Há versão publicada vigente na data?
     def table_available?(code)
@@ -56,14 +57,30 @@ module Catalog
 
     def find_override(code, key)
       return nil unless @firm_id || @client_id
-      ref = Catalog::ReferenceTable.find_by(code:) or return nil
-      scope = Catalog::ReferenceRowOverride.where(reference_table_id: ref.id, key:)
-                .where("effective_from <= ? AND (effective_until IS NULL OR effective_until >= ?)", @date, @date)
-      client = @client_id && scope.find_by(source_type: "client", source_id: @client_id)
-      return client.data.merge("_source" => "client", "_override_id" => client.id) if client
-      firm = @firm_id && scope.find_by(source_type: "firm", source_id: @firm_id)
-      return firm.data.merge("_source" => "firm", "_override_id" => firm.id) if firm
-      nil
+      bucket = overrides[[code, key]] or return nil
+      chosen = bucket["client"] || bucket["firm"] or return nil
+      @row_override_ids_used << chosen[:id] unless @row_override_ids_used.include?(chosen[:id])
+      chosen[:data].merge("_source" => chosen[:source_type], "_override_id" => chosen[:id])
+    end
+
+    # Todos os overrides vigentes de (firma, cliente) numa query só: Audit::Coverage e as derivações
+    # chamam lookup por item, e três queries por chamada viravam milhares por run.
+    # A ordem (effective_from desc, id desc) torna determinística a escolha quando há mais de um vigente.
+    def overrides
+      @overrides ||= begin
+        model = Catalog::ReferenceRowOverride
+        sources = []
+        sources << model.where(source_type: "client", source_id: @client_id) if @client_id
+        sources << model.where(source_type: "firm", source_id: @firm_id) if @firm_id
+        scope = model.where("effective_from <= ? AND (effective_until IS NULL OR effective_until >= ?)", @date, @date)
+                     .merge(sources.reduce(:or))
+        scope.joins(:reference_table).order(effective_from: :desc, id: :desc)
+             .pluck("reference_tables.code", :key, :data, :source_type, :id)
+             .each_with_object({}) do |(code, key, data, source_type, id), h|
+          bucket = (h[[code, Array(key).map(&:to_s)]] ||= {})
+          bucket[source_type] ||= { id:, data:, source_type: }
+        end
+      end
     end
   end
 end

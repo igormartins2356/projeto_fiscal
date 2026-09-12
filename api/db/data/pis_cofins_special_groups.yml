@@ -1,0 +1,24 @@
+# Grupos de NCM com PIS/COFINS monofásico (alíquotas concentradas), expandidos por prefixo sobre a tabela `ncm`
+# publicada (Catalog::Importers::PisCofinsSpecial). Base legal e vigência são dado, não código.
+# `effective_from` é a data de produção de efeitos da lei do grupo; "a confirmar" marca a data ainda não checada na fonte.
+# PENDENTE: Lei 10.485/02 (autopeças, anexos I/II — lista específica, não expansível por prefixo).
+- branch: medicamentos
+  legal_basis: "Lei 10.147/2000, art. 1º I 'a'"
+  effective_from: "2001-01-01" # Lei 10.147/2000, art. 6º (efeitos a partir de 1º/01/2001)
+  prefixes: ["3001", "3003", "3004", "300510", "300630", "300660"]
+  except: ["30039056", "30049046"]
+- branch: perfumaria
+  legal_basis: "Lei 10.147/2000, art. 1º I 'b'"
+  effective_from: "2001-01-01" # Lei 10.147/2000, art. 6º (efeitos a partir de 1º/01/2001)
+  prefixes: ["330300", "3304", "3305", "3306", "3307", "34011190", "34012010", "96032100"]
+  except: []
+- branch: bebidas_frias
+  legal_basis: "Lei 13.097/2015, art. 14"
+  effective_from: "2015-01-01" # a confirmar: Lei 13.097/2015, art. 169 indica efeitos a partir de 01/05/2015
+  prefixes: ["2201", "2202", "2203", "21069010"]
+  except: []
+- branch: combustiveis
+  legal_basis: "Lei 9.718/98 art. 4º; Lei 10.560/02"
+  effective_from: "2015-01-01" # a confirmar: regime monofásico de combustíveis é anterior (Lei 9.990/2000, Lei 10.560/2002)
+  prefixes: ["271012", "271019", "271119", "220710", "220720"]
+  except: []
