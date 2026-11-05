@@ -180,4 +180,20 @@ RSpec.describe Sefaz::DocumentSync do
     expect(entrada["rotulo"]).to eq("Anexo I - Leiaute e Regra de Validação")
   end
 
+  it "cobre também a seção de tabelas de apoio, que o portal chama de Diversos" do
+    tok = "Tab1="
+    xlsx = "PK\x03\x04planilha"
+    mapa = {
+      [:get, "/NJarYc9nus="] => http_ok(listagem([tok, "Tabela de CFOP - Publicada em 04/09/2026"])),
+      [:head, tok] => http_ok("", "Content-Length" => xlsx.bytesize.to_s,
+                                  "Content-Disposition" => "attachment; filename=Tabela_CFOP.xlsx"),
+      [:get, tok] => http_ok(xlsx, "Content-Disposition" => "attachment; filename=Tabela_CFOP.xlsx")
+    }
+    resultado = sync_com(mapa, nil, sections: %w[tabelas_apoio]).call
+    expect(resultado.added).to eq(["tabelas_apoio/#{tok}"])
+    entrada = manifesto["documentos"]["tabelas_apoio/#{tok}"]
+    expect(entrada).to include("arquivo" => "Tabela_CFOP.xlsx", "publicado_em" => "2026-09-04")
+    expect(File).to exist(root.join("storage/sefaz/tabelas_apoio/Tabela_CFOP.xlsx"))
+  end
+
 end

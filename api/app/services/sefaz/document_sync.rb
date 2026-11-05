@@ -17,11 +17,14 @@ module Sefaz
     USER_AGENT = "ValidadorFiscal/1.0 (sincronizacao de documentacao publica da NF-e)".freeze
 
     # Tokens das seções de NF-e/NFC-e no portal (parâmetro tipoConteudo de listaConteudo.aspx).
+    # "tabelas_apoio" é a seção que o portal chama de "Diversos": são as tabelas oficiais (CFOP, FCP
+    # por UF, municípios, países, classificação do IBS/CBS), que várias regras de validação citam.
     SECTIONS = {
       "manuais" => "ndIjl+iEFdE=",
       "esquemas_xml" => "BMPFMBoln3w=",
       "notas_tecnicas" => "04BIflQt1aY=",
-      "informes_tecnicos" => "hXzemuyNHW4="
+      "informes_tecnicos" => "hXzemuyNHW4=",
+      "tabelas_apoio" => "/NJarYc9nus="
     }.freeze
 
     MAX_BYTES = 200 * 1024 * 1024

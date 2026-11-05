@@ -61,4 +61,23 @@ RSpec.describe Ingestion::Nfe::Derivations do
     described_class.call(doc, monitored_cnpj: "12345678000190", catalog: no_tables)
     expect(doc["references"].first).to include("resolved" => true, "document_id" => 7)
   end
+  # A tabela oficial de CFOP traz os indicadores da SEFAZ, mas não a classificação curada por nós.
+  # Código presente na tabela sem o campo é "não sei": gravar false faria a regra de produção própria
+  # silenciar sem ninguém perceber.
+  it "não transforma classificação ausente na linha de CFOP em false" do
+    catalogo = instance_double(Catalog::Lookup, versions_used: {}, row_override_ids_used: [])
+    allow(catalogo).to receive(:table_available?).and_return(true)
+    allow(catalogo).to receive(:lookup).and_return(nil)
+    allow(catalogo).to receive(:lookup).with("cfop", %w[5151])
+      .and_return({ "ind_nfe" => true, "direction" => "outbound", "title" => "CFOP sem curadoria" })
+
+    doc = RuleCaseBuilder.doc(items: [RuleCaseBuilder.normal_item("number" => 1, "product" => { "cfop" => "5151" })])
+    Ingestion::Nfe::Derivations.call(doc, monitored_cnpj: doc.dig("issuer", "cnpj"), catalog: catalogo)
+    item = doc["items"].first
+
+    expect(item["cfop_known"]).to be(true)
+    expect(item).not_to have_key("cfop_own_production")
+    expect(item).not_to have_key("cfop_requires_reference")
+  end
+
 end

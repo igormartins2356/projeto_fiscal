@@ -82,9 +82,12 @@ module Ingestion
           it["cfop_known"] = !cfop_row.nil?
           it["cfop_nature"] = cfop_row&.dig("nature") || "unknown"
           it["cfop_st_role"] = cfop_row&.dig("st_role") || "unknown"
+          # A linha oficial da SEFAZ traz os indicadores, mas não a nossa classificação curada: o
+          # código presente na tabela sem o campo é "não sei", não "não". Gravar false faria a regra
+          # de produção própria e a de referência obrigatória silenciarem sem ninguém perceber.
           if cfop_row
-            it["cfop_requires_reference"] = cfop_row["requires_reference"] == true
-            it["cfop_own_production"] = cfop_row["own_production"] == true
+            it["cfop_requires_reference"] = cfop_row["requires_reference"] == true if cfop_row.key?("requires_reference")
+            it["cfop_own_production"] = cfop_row["own_production"] == true if cfop_row.key?("own_production")
           end
         end
         ncm = p["ncm"].to_s

@@ -216,7 +216,123 @@ A divisão é deliberada:
 | O quê | Onde | No git? |
 |---|---|---|
 | Manifesto: rótulo, arquivo, tamanho, resumo SHA-256, data de publicação e data da coleta | `api/db/data/sefaz/manifest.json` | **sim** |
-| Os arquivos (PDF, ZIP com XSD) | `api/storage/sefaz/<seção>/` | não |
+| Os arquivos (PDF, ZIP com XSD, planilhas) | `api/storage/sefaz/<seção>/` | não |
+
+São cinco seções, 600 documentos: `manuais` (12), `esquemas_xml` (132), `notas_tecnicas` (313),
+`informes_tecnicos` (48) e `tabelas_apoio` (95). A última é a que o portal chama de **Diversos**, e é
+onde vivem as tabelas oficiais que as regras de validação citam: CFOP com vigência e indicadores
+(devolução, retorno, anulação, remessa, combustível), alíquotas de FCP por UF, municípios, países,
+classificação tributária do IBS e CBS, unidades de medida, meios de pagamento, código de benefício
+por CST, lista de serviços, produtos da ANP. Traz também as cadeias de certificado do portal, que
+interessam a uma futura emissão.
+
+### `sefaz_rejeicao` — regras de validação e códigos de rejeição (12/09/2026)
+
+A tabela que a SEFAZ aplica na autorização, extraída da seção 4 do Anexo I do manual: **551 regras**
+com **478 códigos de rejeição distintos**, cada uma com o identificador do campo, os modelos a que se
+aplica (55, 65 ou os dois), a lógica em texto com observações e exceções, a obrigatoriedade, o efeito
+(rejeição ou denegação) e a **mensagem oficial** que o contribuinte recebe.
+
+É o que permite dizer ao contador qual seria a rejeição, que é a dor declarada em `PROJECT_SCOPE.md`,
+e classificar com honestidade o que é redundante com a autorização.
+
+| Origem | Regras | Uso |
+|---|---|---|
+| Seção 4.2, negócio | 507 | fonte do backlog de regras |
+| Seção 4.1, infraestrutura | 38 | certificado, assinatura e schema; não vira regra do validador, alimenta a documentação de emissão |
+| Seção 4.3, consumo indevido | 6 | limite de uso dos webservices; alimenta a emissão |
+
+A chave é o par **identificador + código**, e nenhum dos dois serve sozinho. O mesmo código atende
+regras diferentes, e o mesmo identificador também: `B09-10` cobre tanto emissão posterior ao
+recebimento (703) quanto emissão anterior ao credenciamento (479), porque o identificador aponta o
+campo, não a condição. Chavear só pelo identificador descartava 36 regras em silêncio.
+
+A extração é ancorada no padrão da linha (obrigatoriedade, código de três dígitos, efeito), não em
+posição de coluna, porque as colunas mudam de lugar ao longo das 153 páginas. Três particularidades
+do documento oficial custaram regra perdida até serem tratadas, e cada uma virou teste:
+
+- A SEFAZ publicou uma linha com o typo **"Obirg."** no lugar de "Obrig.".
+- O número da coluna vem **colado ao identificador** ("1C17-40" é a regra C17-40). Era o que escondia
+  as três regras de **denegação** por irregularidade fiscal do emitente e do destinatário.
+- As regras de consumo indevido **não têm identificador**: começam pelo modelo.
+
+Prova de completude, medida por documento: **564 de 569** linhas de regra no Anexo I (a que falta tem
+a coluna de mensagem genuinamente vazia, por ser regra de "mensagens opcionais") e **306 de 306** na
+nota técnica da reforma tributária.
+
+Além do Anexo I, o catálogo já inclui a **nota técnica 2025.002 v1.51**, que é a da reforma
+tributária e a maior fonte fora do manual: 290 regras novas, com códigos de **quatro dígitos**. Total
+atual: **849 linhas e 763 códigos**. Cada linha registra a origem, então dá para saber se a regra vem
+do manual consolidado ou de uma nota específica.
+
+Quatro variações do documento oficial escondiam regra, e cada uma virou teste: o typo "Obirg.", o
+número da coluna colado ao identificador, **"Obrig" sem o ponto final** (escondia a alíquota do IBS
+municipal) e o **identificador com ponto** (B25.1-10, que a reforma usa para subcampo). A mensagem
+também podia sair truncada, porque a célula do PDF é centralizada e o texto começa acima da linha do
+identificador: o extrator passou a olhar para trás.
+
+Cruzamento com o que já temos, em `docs/tasks/analise-documentacao-sefaz/REJEICOES.md`: das 507 de
+negócio, apenas **22 têm código que alguma das nossas 94 regras já cita**. Por assunto, os maiores
+blocos são cadastro e inscrição estadual (105 regras), chave de acesso (57), data e prazo (54),
+totais (52), CST e CSOSN (46), CFOP (45) e substituição tributária (33). Cadastro, chave de acesso e
+data são justamente os assuntos em que hoje não temos nenhuma regra.
+
+### `nfe_layout` — leiaute da NF-e como dado (12/09/2026)
+
+A tabela que `DATA_SOURCES` §1.15 previa desde o início existe: **1.072 campos** do leiaute 4.00, com
+tipo, tamanho, padrão de formato, ocorrência, escala decimal e as **152 enumerações** com os valores
+válidos de cada campo. É para a NF-e o que `sped_layout` é para a EFD, e mais rico: o do SPED guarda
+só nome por posição.
+
+A fonte é o **esquema XML** (pacote de liberação), não o Anexo I do manual. A decisão inverteu o que o
+plano previa, por evidência: o manual descreve o leiaute para humano, em tabela de PDF cujas colunas
+mudam de posição a cada uma das 118 páginas, e a extração por posição saiu desalinhada. O esquema é a
+fonte normativa e já vem estruturado. O Anexo I entra na etapa seguinte, para o identificador do
+manual (B07, I08) e as observações, que o esquema não tem — e é por identificador que as regras de
+validação da SEFAZ referenciam os campos.
+
+A chave é o **caminho** do campo, não a tag: `CNPJ` existe em emitente, destinatário e transportador,
+e `vBC` em quase todo grupo de imposto. Guardar por tag confundiria campos diferentes.
+
+Cruzamento com o parser, em `docs/tasks/analise-documentacao-sefaz/LACUNAS_LEIAUTE.md`: das 902 folhas
+do leiaute, o parser menciona 580 (64%) e **322 não aparecem**. Os maiores grupos ausentes são veículo
+novo (22 campos), ISSQN (11, fora de escopo por decisão), declaração de importação (10), combustível
+(10), cana (8) e nota avulsa (8). Dois merecem atenção porque são ICMS: os grupos **ICMS15** e
+**ICMS53**, de tributação monofásica, com 8 campos cada.
+
+### Tabelas importadas da seção de apoio (onda 1, 12/09/2026)
+
+| Tabela | Classe | Linhas | O que ganhamos |
+|---|---|---|---|
+| `cfop` v2 | B | **619** (era 515) | Os 104 códigos que faltavam, a vigência de cada um, e os indicadores oficiais `ind_devol`, `ind_retor`, `ind_anula`, `ind_remes`, `ind_comb`, `ind_exc_ibs_cbs`, mais título e nota explicativa. O recorte anterior gerava falso positivo em `CFOP.KNOWN`, e a marcação de devolução e anulação estava sendo deduzida |
+| `fcp_uf` v1 | A | 27 | Alíquotas de fundo de combate à pobreza admitidas por UF, distinguindo valor **fixo** de **teto** (`kinds`). 23 UFs têm o adicional |
+| `ibs_cbs_class` v2 | A | 164 | A **vigência de cada classificação**, que o catálogo não tinha, mais tipo de alíquota, indicadores de grupo do XML e o link da base legal. A versão anterior vinha de raspagem de página |
+| `ibs_cbs_cst` v1 | A | 18 | Novo: por situação tributária, quais grupos o XML admite. Permite dizer "CST 010 não aceita grupo de redução" sem escrever regra caso a caso |
+
+Três coisas que a importação corrigiu e que valem registro, porque tinham sido resolvidas por dedução:
+
+- A tabela oficial marca os CFOP 1.205 a 1.207 e x.213 como **anulação de valor** (`ind_anula`), confirmando a correção feita na revisão de 12/09/2026.
+- **Sergipe tem** o adicional de fundo de pobreza, com duas alíquotas (1% e 2%). A reconstrução da alíquota interna havia deixado o campo zerado por não conseguir confirmar o escopo.
+- O **Rio de Janeiro** tem 4% como **teto**, não 2% fixo. A alíquota interna guarda 2%, que é a usada em geral; o teto é outra informação.
+
+Distinção que evita erro: `fcp_uf` diz **quais alíquotas a UF admite** (fonte oficial); `icms_internal_rate.fcp_rate` diz **o que se espera destacado no campo `pFCP` da nota**. São complementares. No Rio Grande do Sul, por exemplo, o adicional existe mas vai em guia própria, fora do `pFCP`.
+
+A importação **preserva a curadoria**: a planilha de CFOP não traz `st_role`, `own_production` nem `nature`, que são classificação fiscal nossa. Ela é mantida código por código, e para os 127 códigos que não tínhamos o campo fica **ausente**, não `false`. Isso exigiu corrigir a derivação, que transformava ausência em `false` e faria a regra de produção própria silenciar sem ninguém perceber.
+
+### Lendo as tabelas de apoio
+
+As tabelas são planilhas. `Sefaz::SpreadsheetReader` lê `xlsx` e `ods` sem gem nova, porque os dois
+são pacotes ZIP com XML e o projeto já tem `rubyzip` e `nokogiri`. Três detalhes que custam dado
+errado se ignorados:
+
+- **Data é número serial do Excel.** `38718` é 01/01/2006. `SpreadsheetReader.to_date` converte; ler
+  como texto gravaria vigência errada, que é o dado mais sensível destas tabelas.
+- **O formato é detectado pelo conteúdo, não pela extensão.** O portal publicou a tabela de alíquotas
+  de FCP de 2024 com o nome terminando em `.xslsx`.
+- **Célula vazia mantém a posição da coluna**, e as centenas de colunas vazias à direita são aparadas.
+
+Ficam fora 7 arquivos em `xls` binário antigo: 6 versões históricas da tabela de NCM (as recentes são
+`xlsx`) e a tabela de unidades de medida de 2016. O leitor recusa com mensagem dizendo o que fazer.
 
 O manifesto versionado é a peça útil: o diff dele entre duas sincronizações mostra exatamente o que a
 SEFAZ publicou ou alterou, e é esse o gatilho para revisar regra. Os arquivos ficam fora porque são
@@ -232,6 +348,9 @@ lugar do `+` do base64, e exige cookie de sessão antes da primeira listagem. Se
 volta vazia; sem escapar o espaço, o download quebra.
 
 `rake sefaz:inventory` resume o que há no espelho, por seção.
+
+O texto extraído dos manuais fica em `api/storage/sefaz/texto`, também fora do git, gerado por
+`pdftotext` (dependência `poppler-utils`, já nos Dockerfiles). É a entrada dos extratores de regra.
 
 ---
 

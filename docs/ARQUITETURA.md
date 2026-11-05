@@ -289,7 +289,7 @@ Agrupadas por escopo. Todas são *dado*; a lista é para dimensionar as primitiv
 | 2 | Tributos no MVP | **Todos**: ICMS/ST, DIFAL, IPI, PIS/COFINS, IBS/CBS/IS. O canônico nasce completo; as regras entram por prioridade. |
 | 3 | Curadoria de regras | Só o Igor no início, mas **arquitetura multi-camada desde o dia 1** (ver 13). |
 | 4 | Alíquotas/ST | Base padrão curada + atualização periódica; **sobreponível por escritório/cliente** (ver 13). |
-| 5 | Fora de escopo | NFS-e/ISS, CT-e, MDF-e. |
+| 5 | Fora de escopo | NFS-e/ISS, CT-e, MDF-e; os outros documentos eletrônicos do portal (NF3e, NFCom, NFAg, NFGas, NF-e ABI); e a **emissão** de NF-e/NFC-e, cujo levantamento do que exigiria está em `docs/EMISSAO_NFE.md` (certificado, assinatura, os oito webservices, contingência, QR Code). |
 | 10 | UFs prioritárias | **Sudeste (SP, MG, RJ, ES)** para curadoria de ST e alíquotas por produto; demais UFs só alíquota geral + FCP. |
 | 11 | Certificado SVRS | e-CNPJ A1 próprio da plataforma para a API de tabelas IBS/CBS; armazenado em KMS/Vault. |
 | 9 | Idioma | **Código em inglês**; só termos padronizados pela legislação em português (princípio 6). |
